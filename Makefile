@@ -4,7 +4,7 @@ export GOWORK := off
 BINARY := bin/browser-platform
 IMAGE ?= mutexai-browser-platform:dev
 
-.PHONY: build run migrate test integration check fmt lint image helm-check install deploy uninstall
+.PHONY: build run migrate test integration keycloak-integration check fmt lint image helm-check install deploy uninstall
 
 install:
 	./scripts/install-platform.sh
@@ -29,6 +29,10 @@ test:
 integration:
 	@test -n "$$TEST_DATABASE_URL" || (echo "TEST_DATABASE_URL must point to a disposable PostgreSQL database"; exit 1)
 	go test ./src/storage/... -race -count=1 -v
+
+keycloak-integration:
+	@test -n "$$TEST_KEYCLOAK_URL" -a -n "$$TEST_KEYCLOAK_CLIENT_ID" -a -n "$$TEST_KEYCLOAK_CLIENT_SECRET" || (echo "Set the three TEST_KEYCLOAK_* variables for a disposable integration account"; exit 1)
+	go test ./src/internal/keycloak -run TestAdminAPI -race -count=1 -v -timeout=2m
 
 fmt:
 	gofmt -w src

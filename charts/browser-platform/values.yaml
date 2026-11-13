@@ -10,7 +10,8 @@ imagePullSecrets: []
 
 # Same convention as browser-controlplane: production supplies a vault-sourced
 # Secret; local development creates a Secret from private Helm values.
-# The existing Secret must contain POSTGRES_PASSWORD.
+# The existing Secret must contain POSTGRES_PASSWORD and, when keycloak.url is
+# configured, KEYCLOAK_CLIENT_SECRET.
 existingSecret: ""
 
 postgres:
@@ -20,6 +21,13 @@ postgres:
   username: mutexai_browser_platform
   password: ""
   sslMode: verify-full
+
+# Optional until partner setup is wired into the API. This is the provisioning
+# credential in master, separate from the console application's login secret.
+keycloak:
+  url: ""
+  clientId: platform-provisioner
+  clientSecret: ""
 
 logLevel: info
 

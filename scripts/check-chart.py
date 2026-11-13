@@ -42,6 +42,22 @@ with tempfile.TemporaryDirectory(prefix="platform-chart-check-") as directory:
     assert 'value: "verify-full"' in result.stdout
     subprocess.run(["helm", "lint", str(chart), "--values", str(values_file)], check=True)
 
+    with_keycloak = {"postgres": local["postgres"], "keycloak": {"url": "http://keycloak.local:8080", "clientSecret": "keycloak-test-secret"}}
+    result = render(with_keycloak, values_file)
+    assert result.returncode == 0, result.stderr
+    parts = documents(result.stdout)
+    deployment = next(part for part in parts if re.search(r"^kind: Deployment$", part, re.M))
+    secret = next(part for part in parts if re.search(r"^kind: Secret$", part, re.M))
+    assert 'KEYCLOAK_CLIENT_SECRET: "keycloak-test-secret"' in secret
+    assert "keycloak-test-secret" not in deployment
+    assert 'name: KEYCLOAK_URL' in deployment and 'value: "platform-provisioner"' in deployment
+    result = render({"postgres": local["postgres"], "keycloak": {"url": "http://keycloak.local:8080"}}, values_file)
+    assert result.returncode != 0 and "keycloak.clientSecret" in result.stderr
+    result = render({**external, "keycloak": {"url": "https://keycloak.production"}}, values_file)
+    assert result.returncode == 0, result.stderr
+    assert not any(re.search(r"^kind: Secret$", part, re.M) for part in documents(result.stdout))
+    assert 'name: KEYCLOAK_URL' in result.stdout
+
     result = render({"postgres": {"host": "postgres.local"}}, values_file)
     assert result.returncode != 0 and "postgres.password" in result.stderr
 

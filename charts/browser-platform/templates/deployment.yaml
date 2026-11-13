@@ -69,6 +69,12 @@ spec:
               value: {{ .Values.postgres.username | quote }}
             - name: POSTGRES_SSLMODE
               value: {{ .Values.postgres.sslMode | quote }}
+            {{- if .Values.keycloak.url }}
+            - name: KEYCLOAK_URL
+              value: {{ .Values.keycloak.url | quote }}
+            - name: KEYCLOAK_CLIENT_ID
+              value: {{ required "keycloak.clientId is required" .Values.keycloak.clientId | quote }}
+            {{- end }}
           startupProbe:
             httpGet:
               path: /internal/v1/health

@@ -76,6 +76,32 @@ Startup connects to PostgreSQL, runs migrations under an advisory lock and start
 
 Each process shares one PostgreSQL pool: at most 10 open connections, up to five idle connections, a 30-minute connection lifetime and a five-minute idle limit. Startup connection checks have a five-second deadline. HTTP requests drain before the pool closes. Every database operation must carry a context with a deadline; the connection timeout alone does not limit query duration. Allow for all replicas, including rollout overlap, when sizing PostgreSQL connections. Pool recovery does not make failed writes safe to retry automatically.
 
+## Keycloak admin client
+
+`src/internal/keycloak` provides the Admin API client for partner setup. It uses one service-account client in `master`; it never uses a human administrator password. The HTTP/token code is separate from realm, application/role and organization operations. Partner allocation, ownership checks and saved setup progress belong to the future partner API, rather than this transport package. The current health-only server and migration command do not call Keycloak.
+
+| Setting | Helm value | Secret key |
+| --- | --- | --- |
+| Admin API base URL | `keycloak.url` | — |
+| Service-account client ID | `keycloak.clientId` (default `platform-provisioner`) | — |
+| Service-account secret | Private `keycloak.clientSecret`, or `existingSecret` | `KEYCLOAK_CLIENT_SECRET` |
+
+`config.LoadKeycloak()` reads `KEYCLOAK_URL`, `KEYCLOAK_CLIENT_ID` and `KEYCLOAK_CLIENT_SECRET` when constructing the setup client. Leave `keycloak.url` empty until setup uses Keycloak. Use HTTPS for deployed service connections; local Kind can use its private development HTTP service. The provisioning credential is separate from the console application's login credential.
+
+The service account needs `create-realm`, with its token scope including the automatically granted permissions for realms it creates. It does not need the master `admin` role. Existing realms require explicit grants. Use one client per process, then call `CloseIdleConnections()` after its callers stop; the client has no background refresh worker.
+
+Requests honor cancellation and a ten-second HTTP timeout. Concurrent requests share a cached token. Realm creation invalidates that cache so the next request obtains the newly granted realm permissions. A `401` causes one fresh authentication attempt; conflicts, permission denials, network errors and server failures are returned without automatic retries. HTTP errors expose a status code through `keycloak.APIError`, with no server response body. Creation timeouts can leave a resource behind, so setup must inspect and verify ownership before retrying. The client never follows redirects, and it never follows a creation response's `Location` URL.
+
+Integration tests need a dedicated service account in local Kubernetes Keycloak with `create-realm` and no existing-realm administrator grants:
+
+```sh
+# Set these privately; never put the client secret in a committed file.
+# TEST_KEYCLOAK_URL, TEST_KEYCLOAK_CLIENT_ID, TEST_KEYCLOAK_CLIENT_SECRET
+make keycloak-integration
+```
+
+The tests create randomly named `platform-kc-test-*` realms, exercise realm creation, role scope mappings, application secret rotation, organization pagination and organization claim configuration, then delete those realms. They do not modify existing customer realms. CI runs the HTTP/token unit tests; the live Keycloak test skips unless all three test variables are supplied.
+
 ## Build and verification
 
 ```sh
