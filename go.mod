@@ -4,7 +4,7 @@ go 1.26.1
 
 require (
 	github.com/gorilla/mux v1.8.1
-	github.com/jackc/pgx/v5 v5.8.0
+	github.com/jackc/pgx/v5 v5.9.2
 	github.com/pressly/goose/v3 v3.27.0
 	go.uber.org/zap v1.27.1
 )
