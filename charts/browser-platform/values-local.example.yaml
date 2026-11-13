@@ -1,0 +1,8 @@
+# Copy to .local/values.yaml and supply the password for the dedicated local
+# database role. This file is an example, not a production configuration.
+postgres:
+  host: platform-db-postgresql.mutexai-security.svc.cluster.local
+  database: mutexai_browser_platform
+  username: mutexai_browser_platform
+  password: ""
+  sslMode: disable

@@ -1,0 +1,90 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "browser-platform.name" . }}
+  labels:
+    {{- include "browser-platform.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "browser-platform.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "browser-platform.selectorLabels" . | nindent 8 }}
+      {{- if not .Values.existingSecret }}
+      annotations:
+        checksum/secrets: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+      {{- end }}
+    spec:
+      terminationGracePeriodSeconds: {{ add .Values.server.shutdownTimeoutSec 5 }}
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: platform
+          image: {{ include "browser-platform.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - secretRef:
+                name: {{ .Values.existingSecret | default (printf "%s-secrets" (include "browser-platform.name" .)) | quote }}
+          env:
+            - name: LISTEN_ADDR
+              value: "0.0.0.0:8080"
+            - name: LOG_LEVEL
+              value: {{ .Values.logLevel | quote }}
+            - name: HTTP_READ_TIMEOUT_SEC
+              value: {{ .Values.server.readTimeoutSec | quote }}
+            - name: HTTP_READ_HEADER_TIMEOUT_SEC
+              value: {{ .Values.server.readHeaderTimeoutSec | quote }}
+            - name: HTTP_WRITE_TIMEOUT_SEC
+              value: {{ .Values.server.writeTimeoutSec | quote }}
+            - name: HTTP_IDLE_TIMEOUT_SEC
+              value: {{ .Values.server.idleTimeoutSec | quote }}
+            - name: HTTP_SHUTDOWN_TIMEOUT_SEC
+              value: {{ .Values.server.shutdownTimeoutSec | quote }}
+            - name: POSTGRES_HOST
+              value: {{ required "postgres.host is required" .Values.postgres.host | quote }}
+            - name: POSTGRES_PORT
+              value: {{ .Values.postgres.port | quote }}
+            - name: POSTGRES_DATABASE
+              value: {{ .Values.postgres.database | quote }}
+            - name: POSTGRES_USERNAME
+              value: {{ .Values.postgres.username | quote }}
+            - name: POSTGRES_SSLMODE
+              value: {{ .Values.postgres.sslMode | quote }}
+          startupProbe:
+            httpGet:
+              path: /internal/v1/health
+              port: http
+            periodSeconds: 3
+            failureThreshold: 60
+          livenessProbe:
+            httpGet:
+              path: /internal/v1/health
+              port: http
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /internal/v1/health/ready
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}

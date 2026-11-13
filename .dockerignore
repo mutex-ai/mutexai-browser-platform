@@ -1,0 +1,13 @@
+.git
+.github
+.env
+.env.*
+bin
+dist
+packages
+keys
+*.pem
+*.log
+go.work
+go.work.sum
+.local

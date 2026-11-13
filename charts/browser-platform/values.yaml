@@ -1,0 +1,38 @@
+replicaCount: 1
+
+image:
+  registry: ""
+  repository: mutexai-browser-platform
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+# Same convention as browser-controlplane: production supplies a vault-sourced
+# Secret; local development creates a Secret from private Helm values.
+# The existing Secret must contain POSTGRES_PASSWORD.
+existingSecret: ""
+
+postgres:
+  host: ""
+  port: 5432
+  database: mutexai_browser_platform
+  username: mutexai_browser_platform
+  password: ""
+  sslMode: verify-full
+
+logLevel: info
+
+server:
+  readTimeoutSec: 30
+  readHeaderTimeoutSec: 5
+  writeTimeoutSec: 30
+  idleTimeoutSec: 120
+  shutdownTimeoutSec: 30
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 64Mi
+  limits:
+    memory: 256Mi

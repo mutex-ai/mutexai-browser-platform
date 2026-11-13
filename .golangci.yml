@@ -1,0 +1,63 @@
+version: "2"
+output:
+  formats:
+    tab:
+      path: stdout
+linters:
+  default: none
+  enable:
+    - dupword
+    - err113
+    - errname
+    - errorlint
+    - exptostd
+    - govet
+    - ineffassign
+    - intrange
+    - loggercheck
+    - makezero
+    - misspell
+    - mirror
+    - perfsprint
+    - revive
+    - staticcheck
+    - unused
+  settings:
+    dupword:
+      keywords:
+        - the
+        - and
+        - a
+        - for
+        - to
+        - as
+        - in
+        - of
+        - with
+        - by
+        - "on"
+        - at
+        - from
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - err113
+        text: do not define dynamic errors, use wrapped static errors instead
+      - linters:
+          - revive
+        text: var-naming
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+formatters:
+  enable:
+    - goimports
+  exclusions:
+    generated: lax

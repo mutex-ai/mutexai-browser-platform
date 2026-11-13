@@ -1,0 +1,123 @@
+name: Browser Platform CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  GOWORK: 'off'
+  GO_VERSION: '1.26.1'
+  IMAGE_NAME: mutexai-browser-platform
+  CHART_DIR: charts/browser-platform
+
+jobs:
+  go:
+    name: Go checks and PostgreSQL integration
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: platform
+          POSTGRES_PASSWORD: platform
+          POSTGRES_DB: platform_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd 'pg_isready -U platform -d platform_test'
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://platform:platform@localhost:5432/platform_test?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: Verify modules and formatting
+        run: |
+          go mod download
+          go mod verify
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+          test -z "$(gofmt -l src)"
+      - name: Build and vet
+        run: |
+          bash -n scripts/*.sh
+          make build
+          go vet ./...
+      - uses: golangci/golangci-lint-action@v7
+        with:
+          version: v2.12.2
+      - name: Unit and database tests
+        run: go test ./... -race -count=1 -timeout 5m
+
+  helm:
+    name: Helm checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.14.0
+      - run: make helm-check
+
+  container:
+    name: Build image and publish releases
+    needs: [go, helm]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER }}
+      ACR_PUSH_CLIENT_ID: ${{ vars.ACR_PUSH_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set image tag and validate release settings
+        run: |
+          IMAGE_TAG="$IMAGE_NAME:ci"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            for name in ACR_LOGIN_SERVER ACR_PUSH_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID; do
+              [[ -n "${!name}" ]] || { echo "Missing variable: $name" >&2; exit 1; }
+            done
+            VERSION="${GITHUB_REF_NAME#v}"
+            [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+            echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+            IMAGE_TAG="$ACR_LOGIN_SERVER/$IMAGE_NAME:$VERSION"
+          fi
+          echo "IMAGE_TAG=$IMAGE_TAG" >> "$GITHUB_ENV"
+      - uses: azure/login@v2
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          client-id: ${{ env.ACR_PUSH_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+      - name: Registry login
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: az acr login --name "${ACR_LOGIN_SERVER%%.*}"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: ${{ startsWith(github.ref, 'refs/tags/v') }}
+          tags: ${{ env.IMAGE_TAG }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - uses: azure/setup-helm@v4
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          version: v3.14.0
+      - name: Package and publish chart
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          sed -i "s|^  registry:.*|  registry: $ACR_LOGIN_SERVER|" "$CHART_DIR/values.yaml"
+          helm package "$CHART_DIR" --version "$VERSION" --app-version "$VERSION" --destination packages
+          helm push "packages/browser-platform-$VERSION.tgz" "oci://$ACR_LOGIN_SERVER/charts"
