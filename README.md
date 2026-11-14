@@ -104,12 +104,14 @@ The Go process reads environment variables only. Helm supplies settings and uses
 | Process setting | Helm setting |
 | --- | --- |
 | `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DATABASE`, `POSTGRES_USERNAME`, `POSTGRES_SSLMODE` | `postgres.host`, `port`, `database`, `username`, `sslMode` |
-| `POSTGRES_PASSWORD` | Private `postgres.password`, or `existingSecret` |
+| `POSTGRES_PASSWORD` | `postgres.existingSecret`; private `postgres.password` for chart-created local Secrets |
 | `KEYCLOAK_URL`, `KEYCLOAK_CLIENT_ID` | `keycloak.url`, `clientId` |
-| `KEYCLOAK_CLIENT_SECRET` | Private `keycloak.clientSecret`, or `existingSecret` |
+| `KEYCLOAK_CLIENT_SECRET` | `keycloak.existingSecret`; private `keycloak.clientSecret` for chart-created local Secrets |
 | `LOG_LEVEL` and `HTTP_*_TIMEOUT_SEC` | `logLevel` and `server.*TimeoutSec` |
 
-The chart groups deployment, application-process and dependency settings. Helm validates value types, required connection settings and timeout ranges before rendering. Unknown or retired settings are rejected. Production uses `existingSecret` containing the PostgreSQL password and Keycloak administration client secret. Local private values let the chart create `browser-platform-secrets` with the same environment contract. Platform needs no UI credential. Chart-managed secret changes trigger a rollout; externally managed secret rotation requires a rollout restart.
+PostgreSQL host, port, database, username and TLS mode are connection settings; they remain configurable outside the password Secret. Production references an existing Secret under each dependency: `postgres.existingSecret` must contain `POSTGRES_PASSWORD`, and `keycloak.existingSecret` must contain `KEYCLOAK_CLIENT_SECRET`. Both Secrets must be in the application namespace. No password is supplied in committed values.
+
+Each dependency can independently use an external Secret or a chart-created one. Local private values let the chart create `browser-platform-postgres` and `browser-platform-keycloak` for the default release name. Chart-managed credential changes trigger a rollout; externally managed credential rotation requires a rollout restart. Platform needs no UI credential. Helm rejects unknown settings and validates connection settings, types and timeout ranges before rendering.
 
 Use the shared local `kind-mutexai-dev` cluster and its Kubernetes PostgreSQL and Keycloak services. Prerequisites are Kind, kubectl, Helm, the container engine used by Kind, a dedicated Platform database/user and the configured provisioning service account.
 

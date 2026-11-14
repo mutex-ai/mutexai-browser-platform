@@ -13,9 +13,14 @@ spec:
     metadata:
       labels:
         {{- include "browser-platform.selectorLabels" . | nindent 8 }}
-      {{- if not .Values.existingSecret }}
+      {{- if or (not .Values.postgres.existingSecret) (not .Values.keycloak.existingSecret) }}
       annotations:
-        checksum/secrets: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- if not .Values.postgres.existingSecret }}
+        checksum/postgres: {{ include (print $.Template.BasePath "/secret-postgres.yaml") . | sha256sum }}
+        {{- end }}
+        {{- if not .Values.keycloak.existingSecret }}
+        checksum/keycloak: {{ include (print $.Template.BasePath "/secret-keycloak.yaml") . | sha256sum }}
+        {{- end }}
       {{- end }}
     spec:
       terminationGracePeriodSeconds: {{ add .Values.server.shutdownTimeoutSec 5 }}
@@ -43,7 +48,9 @@ spec:
               containerPort: 8080
           envFrom:
             - secretRef:
-                name: {{ .Values.existingSecret | default (printf "%s-secrets" (include "browser-platform.name" .)) | quote }}
+                name: {{ .Values.postgres.existingSecret | default (printf "%s-postgres" (include "browser-platform.name" .)) | quote }}
+            - secretRef:
+                name: {{ .Values.keycloak.existingSecret | default (printf "%s-keycloak" (include "browser-platform.name" .)) | quote }}
           env:
             - name: LISTEN_ADDR
               value: "0.0.0.0:8080"

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Check secret delivery and private deployment without real credentials."""
 import json
+from itertools import product
 from pathlib import Path
 import re
 import subprocess
@@ -24,27 +25,48 @@ with tempfile.TemporaryDirectory(prefix="platform-chart-check-") as directory:
         "postgres": {"host": "postgres.local", "password": "chart-test-password", "sslMode": "disable"},
         "keycloak": {"url": "http://keycloak.local:8080", "clientSecret": "keycloak-test-secret"},
     }
-    result = render(local, path)
-    assert result.returncode == 0, result.stderr
-    parts = documents(result.stdout)
-    secret = next(p for p in parts if re.search(r"^kind: Secret$", p, re.M))
-    deployment = next(p for p in parts if re.search(r"^kind: Deployment$", p, re.M))
-    for key, value in [("POSTGRES_PASSWORD", "chart-test-password"), ("KEYCLOAK_CLIENT_SECRET", "keycloak-test-secret")]:
-        assert f'{key}: "{value}"' in secret
-        assert value not in deployment
-    assert 'name: "browser-platform-secrets"' in deployment
-    assert "checksum/secrets:" in deployment
-    assert "type: ClusterIP" in result.stdout and "ingress: []" in result.stdout
-    assert not any(re.search(r"^kind: Ingress$", p, re.M) for p in parts)
-    subprocess.run(["helm", "lint", str(chart), "--values", str(path)], check=True)
+    # Each dependency independently supports a chart-created or external Secret.
+    credentials = [
+        ("postgres", "password", "POSTGRES_PASSWORD"),
+        ("keycloak", "clientSecret", "KEYCLOAK_CLIENT_SECRET"),
+    ]
+    for external_modes in product((False, True), repeat=2):
+        values = json.loads(json.dumps(local))
+        for (section, field, _), external in zip(credentials, external_modes):
+            if external:
+                values[section]['existingSecret'] = f'{section}-from-vault'
+                values[section].pop(field)
+        result = render(values, path)
+        assert result.returncode == 0, result.stderr
+        parts = documents(result.stdout)
+        secrets = [p for p in parts if re.search(r"^kind: Secret$", p, re.M)]
+        deployment = next(p for p in parts if re.search(r"^kind: Deployment$", p, re.M))
+        assert len(secrets) == external_modes.count(False)
+        for (section, field, key), external in zip(credentials, external_modes):
+            name = f'{section}-from-vault' if external else f'browser-platform-{section}'
+            assert f'name: "{name}"' in deployment
+            assert (f'checksum/{section}:' in deployment) == (not external)
+            value = local[section][field]
+            assert value not in deployment
+            if external:
+                assert not any(f'{key}:' in secret for secret in secrets)
+            else:
+                secret = next(secret for secret in secrets if f'{key}:' in secret)
+                assert f'{key}: "{value}"' in secret
+                assert all(f'{other_key}:' not in secret for _, _, other_key in credentials if other_key != key)
+        assert "type: ClusterIP" in result.stdout and "ingress: []" in result.stdout
+        assert not any(re.search(r"^kind: Ingress$", p, re.M) for p in parts)
+        subprocess.run(["helm", "lint", str(chart), "--values", str(path)], check=True)
 
-    external = {"existingSecret": "platform-from-vault", "postgres": {"host": "postgres.production"}, "keycloak": {"url": "https://keycloak.production"}}
+    # Referenced credentials take precedence over stale private values.
+    external = json.loads(json.dumps(local))
+    for section, _, _ in credentials:
+        external[section]['existingSecret'] = f'{section}-from-vault'
+    external['postgres'].pop('sslMode')
     result = render(external, path)
     assert result.returncode == 0, result.stderr
-    assert not any(re.search(r"^kind: Secret$", p, re.M) for p in documents(result.stdout))
-    assert 'name: "platform-from-vault"' in result.stdout
     assert 'value: "verify-full"' in result.stdout
-    subprocess.run(["helm", "lint", str(chart), "--values", str(path)], check=True)
+    assert not any(local[section][field] in result.stdout for section, field, _ in credentials)
     for section, field in [("postgres", "password"), ("keycloak", "clientSecret"), ("keycloak", "url")]:
         values = json.loads(json.dumps(local))
         values[section][field] = ""
@@ -67,6 +89,8 @@ with tempfile.TemporaryDirectory(prefix="platform-chart-check-") as directory:
         ({"image": {"pullPolicy": "Sometimes"}}, "pullPolicy"),
         ({"imagePullSecrets": ["acr-pull"]}, "imagePullSecrets"),
         ({"existingSecret": True}, "existingSecret"),
+        ({"postgres": {"existingSecret": True}}, "existingSecret"),
+        ({"keycloak": {"existingSecret": True}}, "existingSecret"),
         ({"consoleSecrets": {"LOCAL": "retired-setting"}}, "consoleSecrets"),
     ]
     for overrides, field in invalid:
@@ -79,4 +103,4 @@ with tempfile.TemporaryDirectory(prefix="platform-chart-check-") as directory:
         result = render(values, path)
         assert result.returncode != 0 and "schema" in result.stderr and field in result.stderr, field
     assert "CONSOLE_URL" not in deployment and "CONSOLE_CLIENT_SECRET" not in deployment
-print("Chart checks passed: provisioner credentials, existingSecret, private service and native values validation.")
+print("Chart checks passed: independent dependency Secrets, private service and native values validation.")

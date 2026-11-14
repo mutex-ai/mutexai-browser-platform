@@ -20,7 +20,7 @@ flowchart LR
 
 The initial API has no application authentication, by explicit decision. Any caller that reaches it has operator authority across the environment. Kubernetes access and the network boundary therefore protect every operation; four-digit IDs, email domains and ownership tags are not authentication. The chart uses ClusterIP, no ingress, deny-all pod ingress, no mounted service-account token, a non-root process and a read-only filesystem. Future console access requires its own authentication and permission enforcement before opening that network boundary.
 
-Platform holds its PostgreSQL password and the Keycloak provisioning service-account secret. It does not hold UI private keys, employee passwords, extension credentials or company SSO secrets. The UI's private key stays with its deployment; Keycloak reads only public keys. Instance registration accepts approved origins, not credentials or arbitrary JWKS paths.
+Platform holds its PostgreSQL password and the Keycloak provisioning service-account secret. PostgreSQL and Keycloak have separate Secret references; either credential can be managed externally without requiring the other in the same Secret. Committed chart values contain no passwords. Platform does not hold UI private keys, employee passwords, extension credentials or company SSO secrets. The UI's private key stays with its deployment; Keycloak reads only public keys. Instance registration accepts approved origins, not credentials or arbitrary JWKS paths.
 
 ## Findings and changes
 

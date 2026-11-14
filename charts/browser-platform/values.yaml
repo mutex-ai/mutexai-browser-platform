@@ -32,15 +32,10 @@ postgres:
   database: mutexai_browser_platform
   username: mutexai_browser_platform
   sslMode: verify-full
-  password: "" # Private local values only; production uses existingSecret.
+  existingSecret: "" # Must contain POSTGRES_PASSWORD. For local credentials, see values-local.example.yaml.
 
 # Keycloak: the provisioning service account in master, not a human administrator.
 keycloak:
   url: "" # Required; local Kubernetes can use its private HTTP service.
   clientId: platform-provisioner
-  clientSecret: "" # Private local values only; production uses existingSecret.
-
-# Credential source. When set, the chart does not create a Secret.
-# Must contain POSTGRES_PASSWORD and KEYCLOAK_CLIENT_SECRET.
-# Otherwise supply the two private values above and the chart creates its Secret.
-existingSecret: ""
+  existingSecret: "" # Must contain KEYCLOAK_CLIENT_SECRET. For local credentials, see values-local.example.yaml.

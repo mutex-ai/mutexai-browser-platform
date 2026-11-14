@@ -18,7 +18,7 @@ for cmd in helm docker kubectl kind; do
     command -v "$cmd" >/dev/null 2>&1 || fail "$cmd is not installed"
 done
 
-[[ -f "$VALUES_FILE" ]] || fail "Create .local/values.yaml from charts/browser-platform/values-local.example.yaml, or set PLATFORM_VALUES_FILE. Supply database settings and either postgres.password or existingSecret."
+[[ -f "$VALUES_FILE" ]] || fail "Create .local/values.yaml from charts/browser-platform/values-local.example.yaml, or set PLATFORM_VALUES_FILE. Supply connection settings and each dependency's private credential or existingSecret."
 
 # Validate the deployment values without printing Secrets or putting passwords
 # in command-line flags.

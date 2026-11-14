@@ -20,6 +20,6 @@ info "Uninstalling $RELEASE from $KUBE_CONTEXT / $NAMESPACE"
 helm uninstall "$RELEASE" --kube-context "$KUBE_CONTEXT" \
     --namespace "$NAMESPACE" --ignore-not-found --wait --timeout=2m
 
-info "Application and chart-created Secret uninstalled. PostgreSQL, externally managed Secrets and the namespace are retained."
+info "Application and chart-created Secrets uninstalled. PostgreSQL, externally managed Secrets and the namespace are retained."
 info "Private values are retained locally for reinstalling with the same database credentials."
 info "To reinstall: make install"

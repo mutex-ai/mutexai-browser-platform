@@ -152,6 +152,9 @@
             "verify-full"
           ]
         },
+        "existingSecret": {
+          "type": "string"
+        },
         "password": {
           "type": "string"
         }
@@ -178,6 +181,9 @@
           "minLength": 1,
           "pattern": "\\S"
         },
+        "existingSecret": {
+          "type": "string"
+        },
         "clientSecret": {
           "type": "string"
         }
@@ -186,9 +192,6 @@
         "url",
         "clientId"
       ]
-    },
-    "existingSecret": {
-      "type": "string"
     }
   },
   "required": [
@@ -199,7 +202,6 @@
     "logLevel",
     "server",
     "postgres",
-    "keycloak",
-    "existingSecret"
+    "keycloak"
   ]
 }

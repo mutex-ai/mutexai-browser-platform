@@ -31,7 +31,7 @@
 ## Configuration and deployment
 
 - The Go process reads environment variables only. Helm supplies non-secret settings and Secrets; do not add application YAML loading or Kubernetes API clients for configuration.
-- Local private Helm values create the chart Secret. Production uses `existingSecret` with the same environment-variable contract. Keep private values under ignored `.local/`; never commit credentials.
+- Local private Helm values create separate PostgreSQL and Keycloak Secrets. Production uses `postgres.existingSecret` and `keycloak.existingSecret` with the same environment-variable contract. Keep private values under ignored `.local/`; never commit credentials.
 - Use the install/uninstall scripts and local `kind-mutexai-dev` cluster. Pass an explicit Kubernetes context. Do not use AKS or restart other clusters as part of normal local work.
 - PostgreSQL runs in Kubernetes for local development. Do not add a standalone Docker or Compose workflow.
 - Preserve the private ClusterIP service, restricted ingress, container security settings, health probes and bounded shutdown. Do not add public routes or a generic console proxy.
