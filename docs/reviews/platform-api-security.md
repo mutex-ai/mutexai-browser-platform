@@ -33,6 +33,16 @@ Platform holds its PostgreSQL password and the Keycloak provisioning service-acc
 | Console credentials required per-instance environment references. | Removed the manual secret lookup and secret configuration. Console clients use `private_key_jwt`, RS256, a maximum 60-second assertion lifetime and the instance's registered public-key URL. |
 | URL validation duplicated DNS parsing. | Replaced it with Go's URL parser and formatter plus origin, scheme, port and credential restrictions. DNS ownership is an operator approval responsibility; the API does not perform a DNS-ownership check. |
 
+## Follow-up review: 0.2.1
+
+The second adversarial pass kept the realm model, API routes and tenant-creation flow unchanged. It addressed:
+
+| Finding | Change and check |
+| --- | --- |
+| Availability updates wrote a value and then fetched the row separately. Another update could change the response in between. | Use PostgreSQL `UPDATE ... RETURNING` and one shared row scanner. A concurrent test checks that every response contains its requested value. |
+| Bootstrap inspected and disabled an older console client outside the current instance-client model. | Remove that historical cleanup branch. A live test adds an unrelated registration and confirms retries leave it untouched. Ownership and configuration checks still apply to every resource bootstrap actually manages. |
+| Helm accepted invalid or unused values until deployment or process startup. | Group existing values without renaming settings or changing defaults. Helm's native JSON Schema rejects bad types, timeout/port ranges, SSL modes, missing connection settings and retired fields. Local chart-owned and externally supplied Secret modes both remain supported. |
+
 ## Threat checks
 
 | Threat or failure | Control and evidence |

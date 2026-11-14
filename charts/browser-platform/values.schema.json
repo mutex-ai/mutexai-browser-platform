@@ -1,0 +1,205 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "replicaCount": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "registry": {
+          "type": "string"
+        },
+        "repository": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "tag": {
+          "type": "string"
+        },
+        "pullPolicy": {
+          "type": "string",
+          "enum": [
+            "Always",
+            "IfNotPresent",
+            "Never"
+          ]
+        }
+      },
+      "required": [
+        "registry",
+        "repository",
+        "tag",
+        "pullPolicy"
+      ]
+    },
+    "imagePullSecrets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      }
+    },
+    "resources": {
+      "type": "object",
+      "properties": {
+        "requests": {
+          "type": "object"
+        },
+        "limits": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    },
+    "logLevel": {
+      "type": "string",
+      "enum": [
+        "debug",
+        "info",
+        "warn",
+        "error",
+        "dpanic",
+        "panic",
+        "fatal"
+      ]
+    },
+    "server": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "readTimeoutSec": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3600
+        },
+        "readHeaderTimeoutSec": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3600
+        },
+        "writeTimeoutSec": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3600
+        },
+        "idleTimeoutSec": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3600
+        },
+        "shutdownTimeoutSec": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3600
+        }
+      },
+      "required": [
+        "readTimeoutSec",
+        "readHeaderTimeoutSec",
+        "writeTimeoutSec",
+        "idleTimeoutSec",
+        "shutdownTimeoutSec"
+      ]
+    },
+    "postgres": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "host": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "database": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "username": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "sslMode": {
+          "type": "string",
+          "enum": [
+            "disable",
+            "allow",
+            "prefer",
+            "require",
+            "verify-ca",
+            "verify-full"
+          ]
+        },
+        "password": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "host",
+        "port",
+        "database",
+        "username",
+        "sslMode"
+      ]
+    },
+    "keycloak": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https?://"
+        },
+        "clientId": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "clientSecret": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "url",
+        "clientId"
+      ]
+    },
+    "existingSecret": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "replicaCount",
+    "image",
+    "imagePullSecrets",
+    "resources",
+    "logLevel",
+    "server",
+    "postgres",
+    "keycloak",
+    "existingSecret"
+  ]
+}

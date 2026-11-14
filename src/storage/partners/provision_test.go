@@ -57,6 +57,18 @@ func TestProvisioner(t *testing.T) {
 	if err != nil || repeated != ids {
 		t.Fatalf("setup did not resume using the same identity resources: %v", err)
 	}
+	// Unrelated client registrations are not part of this setup's ownership.
+	unrelatedID, err := kc.CreateApplication(ctx, "9999", keycloak.Application{ClientID: "platform-ui", Enabled: new(true), StandardFlowEnabled: new(false), DirectAccessGrantsEnabled: new(false), ServiceAccountsEnabled: new(false)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Provision(ctx, job, partner); err != nil {
+		t.Fatalf("unrelated client blocked setup: %v", err)
+	}
+	unrelated, err := kc.FindApplication(ctx, "9999", "platform-ui")
+	if err != nil || unrelated.ID != unrelatedID || unrelated.Enabled == nil || !*unrelated.Enabled {
+		t.Fatal("unrelated client was changed")
+	}
 	if err := kc.UpdateRealm(ctx, "9999", keycloak.Realm{BruteForceProtected: new(false)}); err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +98,7 @@ func TestProvisioner(t *testing.T) {
 		t.Fatalf("second instance changed the partner's identity resources: %v", err)
 	}
 	other, err := kc.FindApplication(ctx, "9999", second.ConsoleClientID)
-	if err != nil || other.Attributes["jwks.url"] != instances.ConsoleJWKSURL(second.ConsoleURL) || other.RedirectURIs == nil || (*other.RedirectURIs)[0] != second.ConsoleURL+"/api/auth/callback/keycloak-9999" {
+	if err != nil || other.Attributes["jwks.url"] != instances.ConsoleJWKSURL(second.ConsoleURL) || other.RedirectURIs == nil || len(*other.RedirectURIs) != 1 || (*other.RedirectURIs)[0] != second.ConsoleURL+"/api/auth/callback/keycloak-9999" {
 		t.Fatal("second instance inherited another instance's login configuration")
 	}
 	if _, err := p.Provision(ctx, job, partner); err != nil {

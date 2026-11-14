@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"go.uber.org/zap"
 
 	"github.com/mutex-ai/mutexai-browser-platform/src/storage/partners"
-	"go.uber.org/zap"
 )
 
 // PartnerStore is the persistence boundary for the operator API.

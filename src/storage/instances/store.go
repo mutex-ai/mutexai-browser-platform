@@ -76,8 +76,19 @@ func (s *Store) Create(ctx context.Context, key string, in CreateInput) (Instanc
 
 // Get returns approved addresses and the derived console registration settings.
 func (s *Store) Get(ctx context.Context, id int) (Instance, error) {
+	return scanInstance(s.db.QueryRowContext(ctx, `SELECT instance_id,name,console_url,backend_url,accepting_clients,created_ts_utc FROM platform.instances WHERE instance_id=$1`, id))
+}
+
+// SetAvailability returns the row changed by this statement, even if another
+// caller changes availability immediately afterward.
+func (s *Store) SetAvailability(ctx context.Context, id int, accepting bool) (Instance, error) {
+	return scanInstance(s.db.QueryRowContext(ctx, `UPDATE platform.instances SET accepting_clients=$2 WHERE instance_id=$1
+ RETURNING instance_id,name,console_url,backend_url,accepting_clients,created_ts_utc`, id, accepting))
+}
+
+func scanInstance(row *sql.Row) (Instance, error) {
 	var in Instance
-	err := s.db.QueryRowContext(ctx, `SELECT instance_id,name,console_url,backend_url,accepting_clients,created_ts_utc FROM platform.instances WHERE instance_id=$1`, id).Scan(&in.InstanceID, &in.Name, &in.ConsoleURL, &in.BackendURL, &in.AcceptingClients, &in.CreatedTSUTC)
+	err := row.Scan(&in.InstanceID, &in.Name, &in.ConsoleURL, &in.BackendURL, &in.AcceptingClients, &in.CreatedTSUTC)
 	if errors.Is(err, sql.ErrNoRows) {
 		return in, ErrNotFound
 	}
@@ -85,23 +96,7 @@ func (s *Store) Get(ctx context.Context, id int) (Instance, error) {
 		return in, err
 	}
 	in.CreatedTSUTC = in.CreatedTSUTC.UTC()
-	in.ConsoleClientID = ConsoleClientID(id)
+	in.ConsoleClientID = ConsoleClientID(in.InstanceID)
 	in.ConsoleJWKSURL = ConsoleJWKSURL(in.ConsoleURL)
 	return in, nil
-}
-
-// SetAvailability controls new assignments without changing URLs or existing clients.
-func (s *Store) SetAvailability(ctx context.Context, id int, accepting bool) (Instance, error) {
-	result, err := s.db.ExecContext(ctx, "UPDATE platform.instances SET accepting_clients=$2 WHERE instance_id=$1", id, accepting)
-	if err != nil {
-		return Instance{}, err
-	}
-	count, err := result.RowsAffected()
-	if err != nil {
-		return Instance{}, err
-	}
-	if count != 1 {
-		return Instance{}, ErrNotFound
-	}
-	return s.Get(ctx, id)
 }

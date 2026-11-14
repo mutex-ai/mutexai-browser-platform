@@ -7,8 +7,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/mutex-ai/mutexai-browser-platform/src/internal/keycloak"
 	"go.uber.org/zap"
+
+	"github.com/mutex-ai/mutexai-browser-platform/src/internal/keycloak"
 )
 
 // Worker runs one setup at a time; PostgreSQL leases coordinate other replicas.

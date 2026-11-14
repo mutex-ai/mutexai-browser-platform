@@ -49,6 +49,34 @@ with tempfile.TemporaryDirectory(prefix="platform-chart-check-") as directory:
         values = json.loads(json.dumps(local))
         values[section][field] = ""
         result = render(values, path)
-        assert result.returncode != 0 and f"{section}.{field}" in result.stderr
+        assert result.returncode != 0 and section in result.stderr and field in result.stderr
+    # Helm's schema catches invalid values before a pod or Secret is submitted.
+    invalid = [
+        ({"replicaCount": -1}, "replicaCount"),
+        ({"replicaCount": "1"}, "replicaCount"),
+        ({"server": {"readTimeoutSec": 0}}, "readTimeoutSec"),
+        ({"server": {"shutdownTimeoutSec": 3601}}, "shutdownTimeoutSec"),
+        ({"server": {"writeTimeoutSec": "30"}}, "writeTimeoutSec"),
+        ({"server": {"listenAddr": ":9000"}}, "listenAddr"),
+        ({"postgres": {"port": 65536}}, "port"),
+        ({"postgres": {"database": ""}}, "database"),
+        ({"postgres": {"username": " "}}, "username"),
+        ({"postgres": {"sslMode": "optional"}}, "sslMode"),
+        ({"keycloak": {"clientId": ""}}, "clientId"),
+        ({"keycloak": {"url": "ftp://keycloak.local"}}, "url"),
+        ({"image": {"pullPolicy": "Sometimes"}}, "pullPolicy"),
+        ({"imagePullSecrets": ["acr-pull"]}, "imagePullSecrets"),
+        ({"existingSecret": True}, "existingSecret"),
+        ({"consoleSecrets": {"LOCAL": "retired-setting"}}, "consoleSecrets"),
+    ]
+    for overrides, field in invalid:
+        values = json.loads(json.dumps(local))
+        for section, value in overrides.items():
+            if isinstance(value, dict) and isinstance(values.get(section), dict):
+                values[section].update(value)
+            else:
+                values[section] = value
+        result = render(values, path)
+        assert result.returncode != 0 and "schema" in result.stderr and field in result.stderr, field
     assert "CONSOLE_URL" not in deployment and "CONSOLE_CLIENT_SECRET" not in deployment
-print("Chart checks passed: provisioner credentials, existingSecret, private service and required configuration.")
+print("Chart checks passed: provisioner credentials, existingSecret, private service and native values validation.")

@@ -161,18 +161,6 @@ func (p *Provisioner) Provision(ctx context.Context, job Job, partner Partner) (
 	if err != nil {
 		return IdentityIDs{}, err
 	}
-	// Retire only an old global-console registration owned by this exact setup.
-	legacy, legacyErr := p.kc.FindApplication(ctx, console, "platform-ui")
-	if legacyErr == nil {
-		if !owns(legacy.Attributes, ownership(job, "platform-ui")) {
-			return IdentityIDs{}, ErrOwnership
-		}
-		if err := p.kc.UpdateApplication(ctx, console, legacy.ID, keycloak.Application{Enabled: new(false)}); err != nil {
-			return IdentityIDs{}, err
-		}
-	} else if !apiStatus(legacyErr, http.StatusNotFound) {
-		return IdentityIDs{}, legacyErr
-	}
 	if err := p.kc.UpdateRealm(ctx, console, keycloak.Realm{Enabled: new(true)}); err != nil {
 		return IdentityIDs{}, err
 	}

@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"go.uber.org/zap"
 
 	"github.com/mutex-ai/mutexai-browser-platform/src/storage/instances"
-	"go.uber.org/zap"
 )
 
 // InstanceStore is the operator registry's persistence boundary.
@@ -87,7 +87,6 @@ func instanceRoutes(r *mux.Router, store InstanceStore, log *zap.Logger) {
 		}
 		writeJSON(w, 200, instance)
 	}).Methods(http.MethodPatch)
-
 }
 
 func instanceError(w http.ResponseWriter, err error, log *zap.Logger) {

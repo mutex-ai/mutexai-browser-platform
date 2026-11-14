@@ -62,6 +62,30 @@ func testPartners(t *testing.T, db *sql.DB) {
 		t.Fatal(err)
 	}
 
+	t.Run("availability responses match each update", func(t *testing.T) {
+		var updates sync.WaitGroup
+		failures := make(chan error, 32)
+		for i := range 32 {
+			updates.Go(func() {
+				accepting := i%2 == 0
+				got, err := registry.SetAvailability(ctx, 1000, accepting)
+				if err != nil {
+					failures <- err
+				} else if got.AcceptingClients != accepting {
+					failures <- fmt.Errorf("availability response differs from the requested value %t", accepting)
+				}
+			})
+		}
+		updates.Wait()
+		close(failures)
+		for err := range failures {
+			t.Error(err)
+		}
+	})
+	if _, err := registry.SetAvailability(ctx, 1000, true); err != nil {
+		t.Fatal(err)
+	}
+
 	in := partners.CreateInput{InstanceID: 1000, Name: "MSP", ClientName: "Default", SiteName: "Office", ConsoleDomains: []string{"ACME.EXAMPLE."}}
 	var wg sync.WaitGroup
 	results := make(chan partners.Partner, 8)

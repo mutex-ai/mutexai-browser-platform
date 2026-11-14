@@ -1,13 +1,14 @@
-# Copy to .local/values.yaml and supply the password for the dedicated local
-# database role. This file is an example, not a production configuration.
+# Copy to .local/values.yaml and fill both credentials privately.
+# The chart creates the Secret for local development.
 postgres:
   host: platform-db-postgresql.mutexai-security.svc.cluster.local
+  port: 5432
   database: mutexai_browser_platform
   username: mutexai_browser_platform
-  password: ""
   sslMode: disable
+  password: ""
 
 keycloak:
   url: http://keycloak.mutexai-security.svc.cluster.local:8080
   clientId: platform-provisioner
-  clientSecret: "" # Set privately.
+  clientSecret: ""
