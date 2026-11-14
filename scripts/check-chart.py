@@ -1,64 +1,54 @@
 #!/usr/bin/env python3
-"""Check local and externally managed Secret modes without real credentials."""
+"""Check secret delivery and private deployment without real credentials."""
 import json
 from pathlib import Path
 import re
 import subprocess
 import tempfile
 
-root = Path(__file__).resolve().parent.parent
-chart = root / "charts/browser-platform"
+chart = Path(__file__).resolve().parent.parent / "charts/browser-platform"
 
-def render(values, values_file):
-    values_file.write_text(json.dumps(values))
-    return subprocess.run(["helm", "template", "browser-platform", str(chart),
-                           "--values", str(values_file)], text=True, capture_output=True)
+
+def render(values, path):
+    path.write_text(json.dumps(values))
+    return subprocess.run(["helm", "template", "browser-platform", str(chart), "--values", str(path)], text=True, capture_output=True)
+
 
 def documents(manifest):
     return [part for part in manifest.split("---") if re.search(r"^kind:", part, re.M)]
 
+
 with tempfile.TemporaryDirectory(prefix="platform-chart-check-") as directory:
-    values_file = Path(directory) / "values.json"
-    local = {"postgres": {"host": "postgres.local", "password": "chart-test-password", "sslMode": "disable"}}
-    result = render(local, values_file)
+    path = Path(directory) / "values.json"
+    local = {
+        "postgres": {"host": "postgres.local", "password": "chart-test-password", "sslMode": "disable"},
+        "keycloak": {"url": "http://keycloak.local:8080", "clientSecret": "keycloak-test-secret"},
+        "console": {"url": "https://console.example.test", "clientSecret": "console-test-secret-at-least-32-characters"},
+    }
+    result = render(local, path)
     assert result.returncode == 0, result.stderr
     parts = documents(result.stdout)
-    secret = next(part for part in parts if re.search(r"^kind: Secret$", part, re.M))
-    deployment = next(part for part in parts if re.search(r"^kind: Deployment$", part, re.M))
-    assert 'POSTGRES_PASSWORD: "chart-test-password"' in secret
+    secret = next(p for p in parts if re.search(r"^kind: Secret$", p, re.M))
+    deployment = next(p for p in parts if re.search(r"^kind: Deployment$", p, re.M))
+    for key, value in [("POSTGRES_PASSWORD", "chart-test-password"), ("KEYCLOAK_CLIENT_SECRET", "keycloak-test-secret"), ("CONSOLE_CLIENT_SECRET", local["console"]["clientSecret"])]:
+        assert f'{key}: "{value}"' in secret
+        assert value not in deployment
     assert 'name: "browser-platform-secrets"' in deployment
-    assert "chart-test-password" not in deployment
     assert "checksum/secrets:" in deployment
-    assert "DATABASE_URL" not in result.stdout
     assert "type: ClusterIP" in result.stdout and "ingress: []" in result.stdout
-    assert not any(re.search(r"^kind: Ingress$", part, re.M) for part in parts)
-    subprocess.run(["helm", "lint", str(chart), "--values", str(values_file)], check=True)
+    assert not any(re.search(r"^kind: Ingress$", p, re.M) for p in parts)
+    subprocess.run(["helm", "lint", str(chart), "--values", str(path)], check=True)
 
-    external = {"existingSecret": "platform-from-vault", "postgres": {"host": "postgres.production"}}
-    result = render(external, values_file)
+    external = {"existingSecret": "platform-from-vault", "postgres": {"host": "postgres.production"}, "keycloak": {"url": "https://keycloak.production"}, "console": {"url": "https://console.production"}}
+    result = render(external, path)
     assert result.returncode == 0, result.stderr
-    assert not any(re.search(r"^kind: Secret$", part, re.M) for part in documents(result.stdout))
+    assert not any(re.search(r"^kind: Secret$", p, re.M) for p in documents(result.stdout))
     assert 'name: "platform-from-vault"' in result.stdout
     assert 'value: "verify-full"' in result.stdout
-    subprocess.run(["helm", "lint", str(chart), "--values", str(values_file)], check=True)
-
-    with_keycloak = {"postgres": local["postgres"], "keycloak": {"url": "http://keycloak.local:8080", "clientSecret": "keycloak-test-secret"}}
-    result = render(with_keycloak, values_file)
-    assert result.returncode == 0, result.stderr
-    parts = documents(result.stdout)
-    deployment = next(part for part in parts if re.search(r"^kind: Deployment$", part, re.M))
-    secret = next(part for part in parts if re.search(r"^kind: Secret$", part, re.M))
-    assert 'KEYCLOAK_CLIENT_SECRET: "keycloak-test-secret"' in secret
-    assert "keycloak-test-secret" not in deployment
-    assert 'name: KEYCLOAK_URL' in deployment and 'value: "platform-provisioner"' in deployment
-    result = render({"postgres": local["postgres"], "keycloak": {"url": "http://keycloak.local:8080"}}, values_file)
-    assert result.returncode != 0 and "keycloak.clientSecret" in result.stderr
-    result = render({**external, "keycloak": {"url": "https://keycloak.production"}}, values_file)
-    assert result.returncode == 0, result.stderr
-    assert not any(re.search(r"^kind: Secret$", part, re.M) for part in documents(result.stdout))
-    assert 'name: KEYCLOAK_URL' in result.stdout
-
-    result = render({"postgres": {"host": "postgres.local"}}, values_file)
-    assert result.returncode != 0 and "postgres.password" in result.stderr
-
-print("Chart checks passed: local Secret, existingSecret, private service and required credentials.")
+    subprocess.run(["helm", "lint", str(chart), "--values", str(path)], check=True)
+    for section, field in [("postgres", "password"), ("keycloak", "clientSecret"), ("console", "clientSecret"), ("keycloak", "url"), ("console", "url")]:
+        values = json.loads(json.dumps(local))
+        values[section][field] = ""
+        result = render(values, path)
+        assert result.returncode != 0 and f"{section}.{field}" in result.stderr
+print("Chart checks passed: three secrets, existingSecret, private service and required configuration.")

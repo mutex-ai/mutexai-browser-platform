@@ -14,6 +14,8 @@ import (
 	"go.uber.org/zap/zapcore"
 
 	"github.com/mutex-ai/mutexai-browser-platform/src/internal/config"
+	"github.com/mutex-ai/mutexai-browser-platform/src/internal/keycloak"
+	"github.com/mutex-ai/mutexai-browser-platform/src/partners"
 	"github.com/mutex-ai/mutexai-browser-platform/src/server"
 	"github.com/mutex-ai/mutexai-browser-platform/src/storage/postgres"
 	"github.com/mutex-ai/mutexai-browser-platform/src/storage/schema"
@@ -66,7 +68,25 @@ func run() (runErr error) {
 		log.Info("PostgreSQL migrations complete")
 		return nil
 	}
-	srv, err := server.New(server.Options{Cfg: cfg.Server, Handler: api.NewRouter(db, log), Log: log})
+	kcConfig, err := config.LoadKeycloak()
+	if err != nil {
+		return err
+	}
+	kc, err := keycloak.New(kcConfig)
+	if err != nil {
+		return err
+	}
+	defer kc.CloseIdleConnections()
+	provisioner, err := partners.NewProvisioner(kc, config.LoadPartnerSetup())
+	if err != nil {
+		return err
+	}
+	store := partners.NewStore(db)
+	workerCtx, stopWorker := context.WithCancel(ctx)
+	workerDone := make(chan struct{})
+	go func() { defer close(workerDone); partners.NewWorker(store, provisioner, log).Run(workerCtx) }()
+	defer func() { stopWorker(); <-workerDone }()
+	srv, err := server.New(server.Options{Cfg: cfg.Server, Handler: api.NewRouter(db, log, store), Log: log})
 	if err != nil {
 		return err
 	}

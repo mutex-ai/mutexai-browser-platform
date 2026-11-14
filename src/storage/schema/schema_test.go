@@ -56,4 +56,6 @@ func TestPostgresConcurrentMigrations(t *testing.T) {
 	if err := db.QueryRowContext(ctx, "SELECT to_regclass('platform.goose_db_version') IS NOT NULL").Scan(&exists); err != nil || exists {
 		t.Fatalf("migration history must not follow a changed search path: %v", err)
 	}
+	t.Run("partner storage", func(t *testing.T) { testPartners(t, db) })
+
 }

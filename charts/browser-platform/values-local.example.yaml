@@ -6,3 +6,11 @@ postgres:
   username: mutexai_browser_platform
   password: ""
   sslMode: disable
+
+keycloak:
+  url: http://keycloak.mutexai-security.svc.cluster.local:8080
+  clientId: platform-provisioner
+  clientSecret: "" # Set privately.
+console:
+  url: http://127.0.0.1:3000
+  clientSecret: "" # One separate, random console application credential.

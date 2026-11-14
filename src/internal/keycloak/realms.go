@@ -49,12 +49,13 @@ func (c *Client) CreateRealm(ctx context.Context, realm Realm) error {
 	if _, err := c.endpoint([]string{realm.Name}, nil); err != nil {
 		return err
 	}
+	// Even a lost response can mean the realm was created and roles granted.
+	defer c.epoch.Add(1)
 	if _, err := c.do(ctx, http.MethodPost, nil, nil, realm, nil); err != nil {
 		return err
 	}
 	// create-realm grants access to the new realm. The old token does not yet
 	// contain those roles, so the next request must obtain a fresh token.
-	c.epoch.Add(1)
 	return nil
 }
 

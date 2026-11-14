@@ -32,7 +32,7 @@ integration:
 
 keycloak-integration:
 	@test -n "$$TEST_KEYCLOAK_URL" -a -n "$$TEST_KEYCLOAK_CLIENT_ID" -a -n "$$TEST_KEYCLOAK_CLIENT_SECRET" || (echo "Set the three TEST_KEYCLOAK_* variables for a disposable integration account"; exit 1)
-	go test ./src/internal/keycloak -run TestAdminAPI -race -count=1 -v -timeout=2m
+	go test ./src/internal/keycloak ./src/partners -run 'TestAdminAPI|TestProvisioner' -race -count=1 -v -timeout=2m
 
 fmt:
 	gofmt -w src

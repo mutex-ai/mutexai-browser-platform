@@ -292,21 +292,31 @@ func TestAmbiguousCreationFailureIsNotReplayed(t *testing.T) {
 
 func TestCanceledRequestCanBeFollowedBySuccessfulRequest(t *testing.T) {
 	var calls atomic.Int32
+	started := make(chan struct{})
 	client := testClient(t, func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/token") {
 			tokenResponse(w, "token")
 			return
 		}
 		if calls.Add(1) == 1 {
+			close(started)
 			<-r.Context().Done()
 			return
 		}
 		_, _ = w.Write([]byte(`{"id":"realm-id","realm":"1000"}`))
 	})
-	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	if _, err := client.GetRealm(ctx, "1000"); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("canceled request returned %v, want deadline exceeded", err)
+	result := make(chan error, 1)
+	go func() { _, err := client.GetRealm(ctx, "1000"); result <- err }()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("request did not start")
+	}
+	cancel()
+	if err := <-result; !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled request returned %v", err)
 	}
 	if _, err := client.GetRealm(t.Context(), "1000"); err != nil {
 		t.Fatal(err)

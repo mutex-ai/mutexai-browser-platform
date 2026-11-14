@@ -1,154 +1,132 @@
 # Mutex Browser Platform
 
-Private Go service for the shared Mutex Platform API, backed by PostgreSQL.
+Private Go API for the shared partner directory, backed by PostgreSQL. The first implemented slice creates a partner, its initial client/site, and the agreed Keycloak configuration. The [identity ADR](docs/adrs/adr-000-identity-and-access.md) and [Platform ADR](docs/adrs/adr-001-platform-api.md) describe the wider design; their other proposed APIs are not implemented yet.
 
-This repository contains the service foundation. Partner/client/site endpoints, console realm discovery, Keycloak setup and staff permissions are not implemented yet. Their intended behavior is recorded in [ADR-000: Identity and access](docs/adrs/adr-000-identity-and-access.md) and [ADR-001: Internal Platform API](docs/adrs/adr-001-platform-api.md).
+## Operator API
 
-## What runs today
-
-| Component | Behavior |
+| Endpoint | Behavior |
 | --- | --- |
-| HTTP server | Loopback by default; bounded timeouts and graceful shutdown. |
-| PostgreSQL | Required at startup; bounded connection pool and embedded Goose migrations. |
-| Migrations | Create the `platform` schema. An advisory lock coordinates simultaneous starts. No customer tables exist yet. |
-| Liveness | `GET /internal/v1/health` checks that the server is running. |
-| Readiness | `GET /internal/v1/health/ready` checks PostgreSQL with a two-second timeout. |
-| Deployment | ClusterIP service, no ingress, non-root container and a policy denying incoming pod traffic. |
+| `POST /internal/v1/partners` | Save a partner, initial client/site and setup work; return `202`. |
+| `GET /internal/v1/partners/{partner_id}` | Read the partner and current identity setup status. |
+| `GET /internal/v1/health` | Liveness, independent of PostgreSQL and Keycloak availability. |
+| `GET /internal/v1/health/ready` | PostgreSQL readiness with a two-second deadline. |
 
-The initial service has no application authentication. Operator access uses local loopback or Kubernetes port-forwarding authorized by cluster permissions. The ADRs describe the eventual console integration; the service does not yet accept console management requests. Caller identity, staff access enforcement and private service TLS must be implemented before that integration.
+These are initial operator endpoints with no application authentication. Use Kubernetes port-forwarding authorized by cluster RBAC. The chart creates a private ClusterIP service, no ingress and an incoming-traffic policy. Console forwarding, authenticated staff access and service TLS must be implemented before console management uses this API.
 
-## Local development
+After starting the port-forward described below:
 
-Use the shared `mutexai-dev` Kubernetes cluster, as in the browser control-plane repository. The scripts build the application image, load it into Kind and install the Helm release. PostgreSQL runs in Kubernetes; there is no standalone database container or Compose workflow.
+```sh
+curl -i http://127.0.0.1:8002/internal/v1/partners \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: onboarding-example-msp-001' \
+  --data '{"name":"Example MSP","client_name":"Initial client","site_name":"Main office","console_domains":["example-msp.com"]}'
+```
 
-Prerequisites:
+The operator supplies names and approved console domains. The API accepts no IDs, credentials, callback addresses or arbitrary Keycloak operations in this request. Names have a 200-character limit. Domains are normalized, deduplicated and reserved globally; international domains use ASCII punycode. The body limit is 64 KiB.
 
-- `kind`, `kubectl`, `helm` and the container engine used by Kind.
-- A reachable `kind-mutexai-dev` context.
-- A dedicated Platform database and user in the local Kubernetes PostgreSQL deployment.
-- Private Helm values containing its connection settings and password, or an `existingSecret` providing the password.
+The response includes `partner_id`, `client_id`, `site_id`, their names, `console_domains`, `console_realm`, `sso_realm`, `setup_status` and creation time. For the first partner, the IDs are `1000 / 1000 / 1000`, and its realm names are `1000` and `1000-sso`.
 
-Prepare local values once:
+```sh
+curl http://127.0.0.1:8002/internal/v1/partners/1000
+```
+
+| Setup status | Meaning |
+| --- | --- |
+| `pending` | Saved and waiting for the worker. |
+| `running` | A worker holds the setup lease. |
+| `failed` | The last attempt failed; `setup_error` is a safe code and `retry_at` gives the next attempt time. |
+| `complete` | Identity resources and their permanent references are saved. |
+
+`complete` describes identity setup. It does not mean the client has an assigned browser instance, that company SSO is enabled, or that a human administrator has been created. Console domains remain inactive until domain authorization and discovery are implemented.
+
+Retry a timed-out creation with the same `Idempotency-Key` and equivalent request. It returns the same IDs and current status, with `Idempotency-Replayed: true`. Completed retries return `200`; unfinished ones return `202`. Reusing a key for different input or reserving another partner's domain returns `409`. Failed creations roll back the hierarchy and allocation together. Domain normalization and ordering are included in request comparison.
+
+Partner IDs use `1000–9999`. Client numbers are scoped to their partner, and site numbers to their client. All database relationships retain the full parent keys. Committed IDs are never reused; exhaustion returns `id_capacity_exhausted`, including after `9999`. A successful retry still works after exhaustion.
+
+## Keycloak setup
+
+One confidential service-account client, `platform-provisioner` in `master`, supplies Platform's administration credential. Grant `create-realm` and ensure its token scope includes the permissions automatically granted for its new realms. It needs no master `admin` role; existing realms require explicit grants. The application never uses a human administrator password.
+
+For partner `1000`, the worker creates:
+
+| Realm | Resource | Configuration |
+| --- | --- | --- |
+| `1000` | `platform-ui` | Confidential console login, code flow + PKCE S256; password, implicit and service-account grants disabled. |
+| `1000` | `platform-api` | API audience and client roles `admin`, `operator`, `viewer`; login flows disabled. |
+| `1000-sso` | `browser-extension` | Public enrollment login with PKCE S256, no console roles or client secret. |
+| `1000-sso` | Organization alias `1000` | Initial client; permanent organization ID included by the membership mapper. |
+
+Each client and realm is stamped with the saved setup identity and partner. Existing resources are verified before reuse. Conflicts with unrelated resources or changed login settings fail safely; retries do not overwrite them. Realm keys and resource IDs are generated by Keycloak. Setup resumes using the same resources after a lost response or database failure.
+
+The console realm is enabled after configuration. The SSO realm and initial organization remain disabled until the SSO enrollment workflow is implemented. No human accounts are created. An operator manually creates the first account in the Console realm, assigns `platform-api`'s `admin` role and sets a temporary password. MFA is optional initially. Account creation and password handling are outside this API.
+
+The shared console has a separate application credential, reused for its `platform-ui` registrations. The exact login callback is `CONSOLE_URL/api/auth/callback/keycloak-{partner_id}`; logout returns to `CONSOLE_URL/`. The console must support the registered partner-specific provider IDs before using these callbacks. Changing the console credential requires coordinated rotation of the console and all its realm registrations; setup reports a mismatch instead of silently rotating an existing registration.
+
+## Configuration and local Kubernetes
+
+The Go process reads environment variables only. Helm supplies non-secret settings and mounts credentials through `envFrom.secretRef`; the application does not read Kubernetes Secrets or YAML itself.
+
+| Process setting | Helm setting |
+| --- | --- |
+| `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DATABASE`, `POSTGRES_USERNAME`, `POSTGRES_SSLMODE` | `postgres.host`, `port`, `database`, `username`, `sslMode` |
+| `POSTGRES_PASSWORD` | Private `postgres.password`, or `existingSecret` |
+| `KEYCLOAK_URL`, `KEYCLOAK_CLIENT_ID` | `keycloak.url`, `clientId` |
+| `KEYCLOAK_CLIENT_SECRET` | Private `keycloak.clientSecret`, or `existingSecret` |
+| `CONSOLE_URL` | `console.url`; HTTPS, or HTTP for loopback development |
+| `CONSOLE_CLIENT_SECRET` | Private `console.clientSecret`, or `existingSecret`; at least 32 characters |
+| `LOG_LEVEL` and `HTTP_*_TIMEOUT_SEC` | `logLevel` and `server.*TimeoutSec` |
+
+Production sets `existingSecret` containing all three secret keys. Local development supplies private values and the chart creates `browser-platform-secrets`. Both modes use the same application and environment contract. Chart-managed secret changes trigger a rollout; externally managed secret rotation requires a rollout restart. Credentials stay out of inline Deployment values and API responses.
+
+Use the shared local `kind-mutexai-dev` cluster and its Kubernetes PostgreSQL and Keycloak services. Prerequisites are Kind, kubectl, Helm, the container engine used by Kind, a dedicated Platform database/user, and the configured provisioning service account.
 
 ```sh
 mkdir -p .local
 cp charts/browser-platform/values-local.example.yaml .local/values.yaml
 chmod 600 .local/values.yaml
-```
-
-Fill in `postgres.password` for the dedicated database user. `.local/` is excluded from Git and the image build context. The chart creates `browser-platform-secrets`; there is no separate `kubectl create secret` step for the application.
-
-Install or rebuild after code changes:
-
-```sh
+# Fill the three credentials privately.
 make install
 kubectl --context kind-mutexai-dev -n mutexai-platform \
   port-forward deployment/browser-platform 8002:8080
 ```
 
-In another terminal:
+`.local/` is excluded from Git and Docker builds. The scripts always use an explicit `kind-<cluster>` context and do not change the user's current context. They build and load a unique image into Kind. Override `PLATFORM_VALUES_FILE`, `PLATFORM_CLUSTER_NAME` or `PLATFORM_NAMESPACE` when needed. There is no standalone PostgreSQL container or Compose workflow.
+
+`make deploy` aliases `make install`. `make uninstall` removes the application and chart-owned Secret while retaining the database, namespace, private values and external Secrets. `.env.example` is available for host debugging through port-forwards; the process does not load it automatically. Host HTTP binds to loopback by default; Helm binds the pod listener to `0.0.0.0:8080`.
+
+## Reliability and verification
+
+One PostgreSQL transaction saves the initial hierarchy, counters, domain reservations, setup task and change event. The first version's change log identifies the operator API or worker as its source; individual operator identity is not inferred from HTTP headers. Per-person attribution requires configured Kubernetes auditing or future application authentication.
+
+A worker in the same application claims one task at a time. PostgreSQL coordinates replicas with expiring, fenced leases; no database transaction stays open during Keycloak calls. Each attempt has a 45-second deadline inside a 60-second lease. Failures retry after five seconds with backoff capped at five minutes. An expired or replaced worker cannot mark another attempt complete. Requested records survive restarts and Keycloak outages. Domain reservations are not activated by the worker.
+
+The shared PostgreSQL pool permits 10 open and five idle connections, with a 30-minute lifetime and five-minute idle limit. HTTP and worker work stop before their clients and the database pool close. API database work has a five-second deadline. Keycloak requests have a ten-second HTTP timeout plus the attempt context; token refresh is shared, cancellation-aware and renewed after realm creation. Only an authentication rejection triggers one HTTP retry. Ambiguous creation failures are returned for ownership-checked recovery.
 
 ```sh
-curl http://127.0.0.1:8002/internal/v1/health/ready
-```
-
-`make deploy` is an alias for `make install`. The installer validates Helm values before building. Override `PLATFORM_VALUES_FILE`, `PLATFORM_CLUSTER_NAME` or `PLATFORM_NAMESPACE` when needed; the context is always `kind-<cluster name>`. It does not switch the current context, restart the shared cluster or create databases.
-
-`make uninstall` removes the application and its chart-created Secret. It retains the database, namespace, private local values and externally managed Secrets. Reinstall with the same private values to preserve the database credentials.
-
-## Configuration and secrets
-
-The application reads environment variables only. Helm values configure those variables; the Go process does not read YAML or fetch Kubernetes Secrets itself. This follows the browser control-plane chart's convention:
-
-| Configuration | Helm source | Process input |
-| --- | --- | --- |
-| PostgreSQL address, database, username and TLS mode | `postgres.host`, `port`, `database`, `username`, `sslMode` | `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DATABASE`, `POSTGRES_USERNAME`, `POSTGRES_SSLMODE` |
-| Local database password | `postgres.password` in private values; chart-created Secret | `POSTGRES_PASSWORD` through `envFrom.secretRef` |
-| Production database password | `existingSecret`, supplied by the environment's secret-management setup | The same `POSTGRES_PASSWORD` variable |
-| Log level | `logLevel` | `LOG_LEVEL` |
-| Server timeouts | `server.*TimeoutSec` | `HTTP_READ_TIMEOUT_SEC`, `HTTP_READ_HEADER_TIMEOUT_SEC`, `HTTP_WRITE_TIMEOUT_SEC`, `HTTP_IDLE_TIMEOUT_SEC`, `HTTP_SHUTDOWN_TIMEOUT_SEC` |
-
-Production sets `existingSecret` and leaves `postgres.password` empty. The chart then creates no password Secret. Both modes use the same deployment, application and environment-variable names. Passwords are absent from the Deployment's inline environment values. Chart-managed password changes update the pod-template checksum; externally managed Secret changes require a rollout restart after rotation.
-
-PostgreSQL settings are required except the port (`5432`) and TLS mode (`verify-full`). Local values explicitly select `disable` for the development PostgreSQL server, which has no TLS. The chart binds HTTP to `0.0.0.0:8080`; host debugging defaults to `127.0.0.1:8080` unless `LISTEN_ADDR` is set. Server timeouts default to 30 seconds for reading, writing and shutdown, five seconds for headers, and 120 seconds for idle connections. The pod termination grace period exceeds its configured shutdown timeout.
-
-Startup connects to PostgreSQL, runs migrations under an advisory lock and starts HTTP. A database outage after startup makes readiness return `503`, while liveness stays healthy. Readiness recovers when PostgreSQL returns. `.env.example` is only for optional host debugging through a PostgreSQL port-forward; the process does not load it automatically.
-
-Each process shares one PostgreSQL pool: at most 10 open connections, up to five idle connections, a 30-minute connection lifetime and a five-minute idle limit. Startup connection checks have a five-second deadline. HTTP requests drain before the pool closes. Every database operation must carry a context with a deadline; the connection timeout alone does not limit query duration. Allow for all replicas, including rollout overlap, when sizing PostgreSQL connections. Pool recovery does not make failed writes safe to retry automatically.
-
-## Keycloak admin client
-
-`src/internal/keycloak` provides the Admin API client for partner setup. It uses one service-account client in `master`; it never uses a human administrator password. The HTTP/token code is separate from realm, application/role and organization operations. Partner allocation, ownership checks and saved setup progress belong to the future partner API, rather than this transport package. The current health-only server and migration command do not call Keycloak.
-
-| Setting | Helm value | Secret key |
-| --- | --- | --- |
-| Admin API base URL | `keycloak.url` | — |
-| Service-account client ID | `keycloak.clientId` (default `platform-provisioner`) | — |
-| Service-account secret | Private `keycloak.clientSecret`, or `existingSecret` | `KEYCLOAK_CLIENT_SECRET` |
-
-`config.LoadKeycloak()` reads `KEYCLOAK_URL`, `KEYCLOAK_CLIENT_ID` and `KEYCLOAK_CLIENT_SECRET` when constructing the setup client. Leave `keycloak.url` empty until setup uses Keycloak. Use HTTPS for deployed service connections; local Kind can use its private development HTTP service. The provisioning credential is separate from the console application's login credential.
-
-The service account needs `create-realm`, with its token scope including the automatically granted permissions for realms it creates. It does not need the master `admin` role. Existing realms require explicit grants. Use one client per process, then call `CloseIdleConnections()` after its callers stop; the client has no background refresh worker.
-
-Requests honor cancellation and a ten-second HTTP timeout. Concurrent requests share a cached token. Realm creation invalidates that cache so the next request obtains the newly granted realm permissions. A `401` causes one fresh authentication attempt; conflicts, permission denials, network errors and server failures are returned without automatic retries. HTTP errors expose a status code through `keycloak.APIError`, with no server response body. Creation timeouts can leave a resource behind, so setup must inspect and verify ownership before retrying. The client never follows redirects, and it never follows a creation response's `Location` URL.
-
-Integration tests need a dedicated service account in local Kubernetes Keycloak with `create-realm` and no existing-realm administrator grants:
-
-```sh
-# Set these privately; never put the client secret in a committed file.
-# TEST_KEYCLOAK_URL, TEST_KEYCLOAK_CLIENT_ID, TEST_KEYCLOAK_CLIENT_SECRET
+make check
+make build
+# TEST_DATABASE_URL must point to a new disposable database in Kubernetes.
+make integration
+# Supply TEST_KEYCLOAK_URL, TEST_KEYCLOAK_CLIENT_ID, TEST_KEYCLOAK_CLIENT_SECRET privately.
 make keycloak-integration
 ```
 
-The tests create randomly named `platform-kc-test-*` realms, exercise realm creation, role scope mappings, application secret rotation, organization pagination and organization claim configuration, then delete those realms. They do not modify existing customer realms. CI runs the HTTP/token unit tests; the live Keycloak test skips unless all three test variables are supplied.
+`make check` runs formatting, vet, lint, race tests and chart checks. Make sets `GOWORK=off`; use it for direct Go commands too. Tests cover concurrent retries, allocation rollback, ownership verification, lease recovery/fencing, safe errors, request validation, secret delivery and connection failures.
 
-## Build and verification
+Database tests refuse an already populated Platform database. Keycloak tests use randomly named SDK test realms and disposable `9999`/`9999-sso` setup realms; the latter test skips if those names are already occupied. Only resources with the matching saved test ownership are removed. CI runs PostgreSQL integration and HTTP tests; live Keycloak tests require explicitly supplied test credentials.
 
-```sh
-make build
-make test
-make check
-make image
-```
+## CI and layout
 
-`make check` requires `golangci-lint` v2.12.2, Helm and Python 3. Chart checks exercise both local and externally managed Secret modes without using real credentials. Make commands disable the parent Go workspace so this repository builds independently. For direct Go commands in a parent workspace, set `GOWORK=off`.
+Pull requests and main pushes run Go checks, PostgreSQL integration, Helm checks and a container build. Version tags publish an image and OCI chart to ACR after checks pass, using the organization variables `ACR_LOGIN_SERVER`, `ACR_PUSH_CLIENT_ID`, `AZURE_TENANT_ID` and `AZURE_SUBSCRIPTION_ID` and repository-authorized Azure OIDC trust. Publishing artifacts does not deploy to AKS.
 
-Database integration tests require a new, explicitly selected **disposable database** for each run. They refuse to run if the `platform` schema or Goose migration history already exists. The test applies migrations concurrently and retries them without deleting existing data. Never use an application database for these tests.
+| Location | Responsibility |
+| --- | --- |
+| `src/cmd` | Startup, migrations and shutdown |
+| `src/partners` | Partner records, PostgreSQL transactions, identity setup and worker |
+| `src/internal/keycloak` | Typed Admin API transport and resources |
+| `src/internal/config` | Environment settings |
+| `src/storage` | Shared PostgreSQL pool and embedded migrations |
+| `src/web_api` | Private HTTP handlers and JSON responses |
+| `charts/browser-platform`, `scripts` | Deployment and verification |
 
-```sh
-TEST_DATABASE_URL='postgres://platform:platform@127.0.0.1:5432/platform_test?sslmode=disable' make integration
-```
-
-For local integration tests, create a disposable `platform_test` database in Kubernetes and port-forward its PostgreSQL service to `127.0.0.1:5432` before running the command. The tests also cover pool exhaustion, query cancellation, connection replacement and closure. CI supplies a separate temporary PostgreSQL service and runs these tests alongside the unit tests.
-
-Add future SQL migrations under `src/storage/schema`; the binary embeds them. `make migrate` applies migrations without starting HTTP. Published migration files should not be rewritten.
-
-## Deployment boundary
-
-The chart grants no Kubernetes permissions. Operators need existing permission to port-forward. Its NetworkPolicy requires a network plugin that enforces Kubernetes policies; no public ingress or load balancer is created. The HTTP listener does not terminate TLS. The initial operator connection uses Kubernetes port-forwarding; future service callers need approved network access and service transport configuration.
-
-PostgreSQL and its database roles are managed separately from the application chart. The chart delivers their credentials through its local or externally managed Secret mode. For deployments using published images, set `image.registry` and `image.tag` in Helm values. The local installer instead loads a unique development image into Kind and uses `image.pullPolicy=Never`.
-
-## CI and releases
-
-Pull requests and main-branch pushes run build, formatting, vet, lint, race tests, PostgreSQL integration tests, Helm checks and a container build. Pull requests and main-branch builds do not log in to Azure or publish artifacts. The container job waits for the Go and Helm checks and builds once per run.
-
-The registry name is derived from `ACR_LOGIN_SERVER`, using the same Azure registry and organization variables as control-plane. Tags in `vMAJOR.MINOR.PATCH` format publish the image `mutexai-browser-platform` and the chart `browser-platform` after all checks pass. The release workflow requires repository or organization variables `ACR_LOGIN_SERVER`, `ACR_PUSH_CLIENT_ID`, `AZURE_TENANT_ID` and `AZURE_SUBSCRIPTION_ID`, plus Azure OIDC trust for this repository. No registry or cloud account is hard-coded.
-
-## Source and layout
-
-The foundation was derived from `mutex-ai/mutexai-browser-controlplane` commit `bdfeacda929b8526408d0a1f9e23741ff715ca19`. Server lifecycle, logging conventions, HTTP helpers and tooling were retained or adapted. The local install/uninstall scripts follow the CP's Kind-and-Helm workflow. Browser functionality, old authentication assumptions and ClickHouse/Redis storage were excluded. The source repository and its uncommitted changes were preserved.
-
-```text
-src/cmd/              Startup and shutdown
-src/internal/config/ Environment settings
-src/server/           HTTP lifecycle
-src/storage/postgres/ Connection pool
-src/storage/schema/   Embedded PostgreSQL migrations
-src/web_api/          Private routes and HTTP helpers
-charts/browser-platform/
-scripts/              Local Kubernetes install and uninstall
-docs/adrs/
-```
-
-The ADRs were copied from the infrastructure repository as the design baseline. Implementation status is described above; a proposed endpoint in an ADR is not an implemented route.
+The original foundation was adapted from control-plane commit `bdfeacda929b8526408d0a1f9e23741ff715ca19`. Browser telemetry, device sessions and policies remain in the instance backend. [AGENTS.md](AGENTS.md) records the repository's working rules. Published migrations are never rewritten; add new SQL files under `src/storage/schema`.

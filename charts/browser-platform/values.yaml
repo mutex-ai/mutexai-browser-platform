@@ -22,11 +22,15 @@ postgres:
   password: ""
   sslMode: verify-full
 
-# Optional until partner setup is wired into the API. This is the provisioning
+# This is the provisioning
 # credential in master, separate from the console application's login secret.
 keycloak:
   url: ""
   clientId: platform-provisioner
+  clientSecret: ""
+
+console:
+  url: ""
   clientSecret: ""
 
 logLevel: info

@@ -11,10 +11,11 @@ import (
 // Organization represents one client within its partner's SSO realm. Alias is
 // the client number; the generated ID is stored with the full ownership path.
 type Organization struct {
-	ID      string `json:"id,omitempty"`
-	Name    string `json:"name"`
-	Alias   string `json:"alias"`
-	Enabled *bool  `json:"enabled,omitempty"`
+	Attributes map[string][]string `json:"attributes,omitempty"`
+	ID         string              `json:"id,omitempty"`
+	Name       string              `json:"name"`
+	Alias      string              `json:"alias"`
+	Enabled    *bool               `json:"enabled,omitempty"`
 }
 
 // CreateOrganization creates a client organization and returns its Keycloak ID.

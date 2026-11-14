@@ -38,6 +38,7 @@ type Mapper struct {
 
 // Role is a client role, such as admin, operator or viewer.
 type Role struct {
+	Composite   bool   `json:"composite,omitempty"`
 	ID          string `json:"id,omitempty"`
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
@@ -109,4 +110,19 @@ func (c *Client) ClientRoles(ctx context.Context, realm, clientID string) ([]Rol
 func (c *Client) AllowClientRoles(ctx context.Context, realm, loginClientID, resourceClientID string, roles []Role) error {
 	_, err := c.do(ctx, http.MethodPost, []string{realm, "clients", loginClientID, "scope-mappings", "clients", resourceClientID}, nil, roles, nil)
 	return err
+}
+
+// ApplicationSecret reads the console application's secret for retry verification.
+// The returned value must never be logged or returned to API callers.
+func (c *Client) ApplicationSecret(ctx context.Context, realm, id string) (string, error) {
+	var body struct {
+		Value string `json:"value"`
+	}
+	if _, err := c.do(ctx, http.MethodGet, []string{realm, "clients", id, "client-secret"}, nil, nil, &body); err != nil {
+		return "", err
+	}
+	if body.Value == "" {
+		return "", errors.New("keycloak returned no application secret")
+	}
+	return body.Value, nil
 }

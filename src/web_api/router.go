@@ -16,7 +16,7 @@ type Pinger interface {
 }
 
 // NewRouter mounts only the implemented private endpoints.
-func NewRouter(db Pinger, log *zap.Logger) http.Handler {
+func NewRouter(db Pinger, log *zap.Logger, store PartnerStore) http.Handler {
 	r := mux.NewRouter()
 	r.Use(recoverPanics(log))
 	r.HandleFunc("/internal/v1/health", func(w http.ResponseWriter, _ *http.Request) {
@@ -32,6 +32,9 @@ func NewRouter(db Pinger, log *zap.Logger) http.Handler {
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ready", "postgresql": "ok"})
 	}).Methods(http.MethodGet)
+	if store != nil {
+		partnerRoutes(r, store, log)
+	}
 	r.NotFoundHandler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "route not found")
 	})
