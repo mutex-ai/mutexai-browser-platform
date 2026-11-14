@@ -1,0 +1,17 @@
+{
+  "slug": "example-app",
+  "kind": "application",
+  "profile": {
+    "name": "Example App",
+    "vendor": "Example",
+    "urls": {
+      "homepage": ["example.com"],
+      "hosts": ["example.com", "*.example.com"]
+    }
+  },
+  "classification": {
+    "category": "productivity",
+    "subcategory": "documents",
+    "modalities": {"in": [], "out": []}
+  }
+}

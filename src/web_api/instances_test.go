@@ -39,7 +39,7 @@ func TestInstanceAPI(t *testing.T) {
 	} {
 		t.Run(tc.method+tc.body, func(t *testing.T) {
 			store := &instanceStub{}
-			router := NewRouter(pingFunc(func(context.Context) error { return nil }), zap.NewNop(), nil, store)
+			router := NewRouter(pingFunc(func(context.Context) error { return nil }), zap.NewNop(), nil, store, nil)
 			req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
 			req.Header.Set("Content-Type", "application/json")
 			req.Header.Set("Idempotency-Key", "instance-key")

@@ -25,7 +25,7 @@ func TestReadinessFailureDoesNotFailLiveness(t *testing.T) {
 			t.Error("database check must have a bounded deadline")
 		}
 		return errors.New("postgres://user:private-secret@host/platform")
-	}), zap.NewNop(), nil, nil)
+	}), zap.NewNop(), nil, nil, nil)
 	for _, tc := range []struct {
 		path string
 		code int
@@ -51,7 +51,7 @@ func TestReadinessRecovery(t *testing.T) {
 			return errors.New("database unavailable")
 		}
 		return nil
-	}), zap.NewNop(), nil, nil)
+	}), zap.NewNop(), nil, nil, nil)
 	for _, code := range []int{http.StatusServiceUnavailable, http.StatusOK} {
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/internal/v1/health/ready", nil))
@@ -63,7 +63,7 @@ func TestReadinessRecovery(t *testing.T) {
 }
 
 func TestRemovedRoutesAndMethods(t *testing.T) {
-	router := NewRouter(pingFunc(func(context.Context) error { return nil }), zap.NewNop(), nil, nil)
+	router := NewRouter(pingFunc(func(context.Context) error { return nil }), zap.NewNop(), nil, nil, nil)
 	for _, path := range []string{"/api/v1/health", "/api/v1/devices", "/api/v1/agent/telemetry", "/api/v1/identity/token", "/internal/v1/partners"} {
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))

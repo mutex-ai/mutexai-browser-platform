@@ -1,0 +1,1088 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mutex.ai/schemas/application-definition/v1.json",
+  "title": "App",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "slug",
+    "kind",
+    "profile",
+    "classification",
+    "meta"
+  ],
+  "properties": {
+    "slug": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+      "maxLength": 200
+    },
+    "kind": {
+      "$ref": "#/$defs/kind"
+    },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "urls"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "vendor": {
+          "type": "string"
+        },
+        "urls": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "homepage",
+            "hosts"
+          ],
+          "properties": {
+            "homepage": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "hosts": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "grouping": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "family": {
+              "type": "string"
+            },
+            "suite": {
+              "$ref": "#/$defs/suite"
+            }
+          }
+        },
+        "depends_on": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "classification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "modalities"
+      ],
+      "properties": {
+        "category": {
+          "$ref": "#/$defs/category"
+        },
+        "subcategory": {
+          "$ref": "#/$defs/subcategory"
+        },
+        "delivery": {
+          "$ref": "#/$defs/delivery"
+        },
+        "offerings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/offering"
+          }
+        },
+        "modalities": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "in",
+            "out"
+          ],
+          "properties": {
+            "in": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/modality"
+              }
+            },
+            "out": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/modality"
+              }
+            }
+          }
+        },
+        "labels": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/label"
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/capability"
+      }
+    },
+    "genai": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "trains_on_data": {
+          "$ref": "#/$defs/disclosure"
+        },
+        "fine_tuning": {
+          "$ref": "#/$defs/disclosure"
+        },
+        "input_monitored": {
+          "$ref": "#/$defs/disclosure"
+        },
+        "has_marketplace": {
+          "$ref": "#/$defs/disclosure"
+        },
+        "guardrails": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "present": {
+              "$ref": "#/$defs/disclosure"
+            },
+            "url": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "risk": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "score": {
+          "type": "integer",
+          "enum": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        "signals": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "known_breaches": {
+              "$ref": "#/$defs/disclosure"
+            },
+            "unfair_terms": {
+              "$ref": "#/$defs/disclosure"
+            },
+            "financial_risk": {
+              "$ref": "#/$defs/disclosure"
+            },
+            "spoof_risk": {
+              "$ref": "#/$defs/spoof_risk"
+            }
+          }
+        }
+      }
+    },
+    "trust": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "encryption": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "in_transit": {
+              "type": "string"
+            },
+            "downgrade_protected": {
+              "$ref": "#/$defs/disclosure"
+            },
+            "pqc": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "quantum_ready": {
+              "$ref": "#/$defs/disclosure"
+            },
+            "at_rest": {
+              "$ref": "#/$defs/disclosure"
+            },
+            "at_rest_strength": {
+              "type": "string"
+            }
+          }
+        },
+        "access": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "saml": {
+              "$ref": "#/$defs/disclosure"
+            },
+            "mfa": {
+              "$ref": "#/$defs/disclosure"
+            },
+            "rbac": {
+              "$ref": "#/$defs/disclosure"
+            },
+            "password_policy": {
+              "$ref": "#/$defs/disclosure"
+            },
+            "session_timeout": {
+              "type": "string"
+            },
+            "ip_restrictions": {
+              "$ref": "#/$defs/disclosure"
+            }
+          }
+        },
+        "operations": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "audit_log": {
+              "$ref": "#/$defs/disclosure"
+            },
+            "disaster_recovery": {
+              "$ref": "#/$defs/disclosure"
+            }
+          }
+        },
+        "security_headers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "data_handling": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "retention": {
+          "$ref": "#/$defs/retention"
+        },
+        "ownership": {
+          "$ref": "#/$defs/ownership"
+        },
+        "third_party_sharing": {
+          "$ref": "#/$defs/disclosure"
+        },
+        "file_content_sharing": {
+          "$ref": "#/$defs/disclosure"
+        }
+      }
+    },
+    "legal": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "indemnity": {
+          "$ref": "#/$defs/disclosure"
+        },
+        "privacy_policy": {
+          "$ref": "#/$defs/policy_doc"
+        },
+        "terms": {
+          "$ref": "#/$defs/policy_doc"
+        }
+      }
+    },
+    "certifications": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/certification"
+      }
+    },
+    "network": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ports": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "meta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version"
+      ],
+      "properties": {
+        "schema_version": {
+          "type": "integer",
+          "const": 3
+        },
+        "curation_locked": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "policy_critical": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "identity"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "classification": {
+            "properties": {
+              "category": false
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "genai"
+        ]
+      },
+      "then": {
+        "properties": {
+          "classification": {
+            "required": [
+              "labels"
+            ],
+            "properties": {
+              "labels": {
+                "contains": {
+                  "const": "Gen AI"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "classification": {
+            "properties": {
+              "category": {
+                "const": "assistants"
+              }
+            }
+          }
+        },
+        "required": [
+          "classification"
+        ]
+      },
+      "then": {
+        "properties": {
+          "classification": {
+            "properties": {
+              "subcategory": {
+                "enum": [
+                  "chatbot",
+                  "companion",
+                  "character-chat",
+                  "aggregator"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "classification": {
+            "properties": {
+              "category": {
+                "const": "writing"
+              }
+            }
+          }
+        },
+        "required": [
+          "classification"
+        ]
+      },
+      "then": {
+        "properties": {
+          "classification": {
+            "properties": {
+              "subcategory": {
+                "enum": [
+                  "writing-assistant",
+                  "content-generation",
+                  "summarization",
+                  "grammar",
+                  "ai-detection",
+                  "creative-writing"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "classification": {
+            "properties": {
+              "category": {
+                "const": "creative"
+              }
+            }
+          }
+        },
+        "required": [
+          "classification"
+        ]
+      },
+      "then": {
+        "properties": {
+          "classification": {
+            "properties": {
+              "subcategory": {
+                "enum": [
+                  "image-generation",
+                  "image-editing",
+                  "video",
+                  "voice",
+                  "music",
+                  "graphic-design",
+                  "design-tools"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "classification": {
+            "properties": {
+              "category": {
+                "const": "developer-tools"
+              }
+            }
+          }
+        },
+        "required": [
+          "classification"
+        ]
+      },
+      "then": {
+        "properties": {
+          "classification": {
+            "properties": {
+              "subcategory": {
+                "enum": [
+                  "code-assistant",
+                  "code-tools",
+                  "model-platform",
+                  "ai-api"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "classification": {
+            "properties": {
+              "category": {
+                "const": "agents"
+              }
+            }
+          }
+        },
+        "required": [
+          "classification"
+        ]
+      },
+      "then": {
+        "properties": {
+          "classification": {
+            "properties": {
+              "subcategory": {
+                "enum": [
+                  "builder",
+                  "framework",
+                  "marketplace",
+                  "automation"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "classification": {
+            "properties": {
+              "category": {
+                "const": "productivity"
+              }
+            }
+          }
+        },
+        "required": [
+          "classification"
+        ]
+      },
+      "then": {
+        "properties": {
+          "classification": {
+            "properties": {
+              "subcategory": {
+                "enum": [
+                  "documents",
+                  "communication",
+                  "scheduling",
+                  "storage",
+                  "notes",
+                  "translation",
+                  "meetings",
+                  "personal-assistant",
+                  "email",
+                  "project-management",
+                  "knowledge-base",
+                  "whiteboard"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "classification": {
+            "properties": {
+              "category": {
+                "const": "knowledge"
+              }
+            }
+          }
+        },
+        "required": [
+          "classification"
+        ]
+      },
+      "then": {
+        "properties": {
+          "classification": {
+            "properties": {
+              "subcategory": {
+                "enum": [
+                  "answer-engine",
+                  "enterprise-search",
+                  "research",
+                  "analytics"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "classification": {
+            "properties": {
+              "category": {
+                "const": "business"
+              }
+            }
+          }
+        },
+        "required": [
+          "classification"
+        ]
+      },
+      "then": {
+        "properties": {
+          "classification": {
+            "properties": {
+              "subcategory": {
+                "enum": [
+                  "customer-support",
+                  "crm",
+                  "sales",
+                  "marketing",
+                  "hr",
+                  "finance"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "classification": {
+            "properties": {
+              "category": {
+                "const": "education"
+              }
+            }
+          }
+        },
+        "required": [
+          "classification"
+        ]
+      },
+      "then": {
+        "properties": {
+          "classification": {
+            "properties": {
+              "subcategory": {
+                "enum": [
+                  "tutoring",
+                  "study-tools",
+                  "corporate-learning"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "classification": {
+            "properties": {
+              "category": {
+                "const": "security"
+              }
+            }
+          }
+        },
+        "required": [
+          "classification"
+        ]
+      },
+      "then": {
+        "properties": {
+          "classification": {
+            "properties": {
+              "subcategory": {
+                "enum": [
+                  "identity-access",
+                  "endpoint",
+                  "compliance",
+                  "app-security"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "classification": {
+            "properties": {
+              "category": {
+                "const": "infrastructure"
+              }
+            }
+          }
+        },
+        "required": [
+          "classification"
+        ]
+      },
+      "then": {
+        "properties": {
+          "classification": {
+            "properties": {
+              "subcategory": {
+                "enum": [
+                  "source-control",
+                  "ci-cd",
+                  "cloud-platform",
+                  "observability",
+                  "data-platform"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "classification": {
+            "properties": {
+              "category": {
+                "const": "other"
+              }
+            }
+          }
+        },
+        "required": [
+          "classification"
+        ]
+      },
+      "then": {
+        "properties": {
+          "classification": {
+            "properties": {
+              "subcategory": {
+                "enum": []
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "disclosure": {
+      "enum": [
+        "yes",
+        "no",
+        "unknown"
+      ]
+    },
+    "kind": {
+      "enum": [
+        "application",
+        "identity"
+      ]
+    },
+    "delivery": {
+      "enum": [
+        "browser-based",
+        "client-server",
+        "unknown"
+      ]
+    },
+    "spoof_risk": {
+      "enum": [
+        "safe",
+        "low",
+        "medium",
+        "high",
+        "unknown"
+      ]
+    },
+    "ownership": {
+      "enum": [
+        "customer",
+        "provider",
+        "joint",
+        "unknown"
+      ]
+    },
+    "retention": {
+      "enum": [
+        "1-30-days",
+        "1-12-months",
+        "over-1-year",
+        "while-active",
+        "unknown"
+      ]
+    },
+    "modality": {
+      "enum": [
+        "text",
+        "image",
+        "audio",
+        "video"
+      ]
+    },
+    "offering": {
+      "enum": [
+        "enterprise-app",
+        "non-enterprise-app",
+        "enterprise-copilot",
+        "saas-platform"
+      ]
+    },
+    "suite": {
+      "enum": [
+        "google-workspace",
+        "microsoft-365",
+        "adobe-creative-cloud",
+        "dynamics-365"
+      ]
+    },
+    "label": {
+      "enum": [
+        "Gen AI",
+        "Office 365",
+        "G Suite",
+        "Enterprise VOIP"
+      ]
+    },
+    "capability_kind": {
+      "enum": [
+        "app.auth",
+        "app.oauth_grant",
+        "data.prompt",
+        "data.input",
+        "data.upload",
+        "data.download",
+        "data.edit",
+        "data.create",
+        "data.delete",
+        "data.share",
+        "data.post",
+        "data.copy",
+        "data.move"
+      ]
+    },
+    "capability_status": {
+      "enum": [
+        "expected",
+        "located",
+        "confirmed"
+      ]
+    },
+    "attestation": {
+      "enum": [
+        "claimed",
+        "verified"
+      ]
+    },
+    "category": {
+      "enum": [
+        "assistants",
+        "writing",
+        "creative",
+        "developer-tools",
+        "agents",
+        "productivity",
+        "knowledge",
+        "business",
+        "education",
+        "security",
+        "infrastructure",
+        "other"
+      ]
+    },
+    "framework": {
+      "enum": [
+        "soc1",
+        "soc2",
+        "ssae16",
+        "ssae18",
+        "isae_3402",
+        "iso_27001",
+        "iso_27002",
+        "iso_27017",
+        "iso_27018",
+        "iso_9000",
+        "iso_9001",
+        "csa_star",
+        "fedramp",
+        "fisma",
+        "nist_sp_80053",
+        "hitrust_csf",
+        "hipaa",
+        "pci",
+        "sox",
+        "gdpr",
+        "itar",
+        "safe_harbor",
+        "privacy_shield",
+        "coppa",
+        "ferpa",
+        "glba",
+        "ffiec",
+        "finra",
+        "cjis",
+        "c5",
+        "gapp",
+        "cobit",
+        "jericho_forum_comm",
+        "privacy_mark_japan",
+        "trustarc"
+      ]
+    },
+    "subcategory": {
+      "enum": [
+        "chatbot",
+        "companion",
+        "character-chat",
+        "aggregator",
+        "writing-assistant",
+        "content-generation",
+        "summarization",
+        "grammar",
+        "ai-detection",
+        "creative-writing",
+        "image-generation",
+        "image-editing",
+        "video",
+        "voice",
+        "music",
+        "graphic-design",
+        "design-tools",
+        "code-assistant",
+        "code-tools",
+        "model-platform",
+        "ai-api",
+        "builder",
+        "framework",
+        "marketplace",
+        "automation",
+        "documents",
+        "communication",
+        "scheduling",
+        "storage",
+        "notes",
+        "translation",
+        "meetings",
+        "personal-assistant",
+        "email",
+        "project-management",
+        "knowledge-base",
+        "whiteboard",
+        "answer-engine",
+        "enterprise-search",
+        "research",
+        "analytics",
+        "customer-support",
+        "crm",
+        "sales",
+        "marketing",
+        "hr",
+        "finance",
+        "tutoring",
+        "study-tools",
+        "corporate-learning",
+        "identity-access",
+        "endpoint",
+        "compliance",
+        "app-security",
+        "source-control",
+        "ci-cd",
+        "cloud-platform",
+        "observability",
+        "data-platform"
+      ]
+    },
+    "capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "status"
+      ],
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/capability_kind"
+        },
+        "status": {
+          "$ref": "#/$defs/capability_status"
+        },
+        "host": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "method": {
+          "type": "string"
+        },
+        "idp": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        }
+      }
+    },
+    "certification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "framework",
+        "attestation"
+      ],
+      "properties": {
+        "framework": {
+          "$ref": "#/$defs/framework"
+        },
+        "attestation": {
+          "$ref": "#/$defs/attestation"
+        },
+        "as_of": {
+          "type": "string"
+        },
+        "evidence_url": {
+          "type": "string"
+        }
+      }
+    },
+    "policy_doc": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "present": {
+          "$ref": "#/$defs/disclosure"
+        },
+        "url": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "$comment": "Adapted from the control-plane catalog schema v3. IDs, revisions, and write timestamps are supplied by Platform."
+}

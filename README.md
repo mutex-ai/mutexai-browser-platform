@@ -1,6 +1,6 @@
 # Mutex Browser Platform
 
-Private Go API for the shared partner and instance directory, backed by PostgreSQL. It registers instances and creates a partner with its initial client/site and Keycloak configuration. The [identity ADR](docs/adrs/adr-000-identity-and-access.md) and [Platform ADR](docs/adrs/adr-001-platform-api.md) describe the wider design; their other proposed APIs are not implemented yet.
+Private Go API for the shared partner and instance directory and global application registry, backed by PostgreSQL. It registers instances, creates a partner with its initial client/site and Keycloak configuration, and stores application definitions with unique host claims. The [identity ADR](docs/adrs/adr-000-identity-and-access.md), [Platform ADR](docs/adrs/adr-001-platform-api.md) and [application registry ADR](docs/adrs/adr-002-application-registry.md) describe the design; their other proposed APIs are not implemented yet.
 
 ## Operator API
 
@@ -11,6 +11,10 @@ Private Go API for the shared partner and instance directory, backed by PostgreS
 | `PATCH /internal/v1/instances/{instance_id}` | Set `accepting_clients`; existing assignments remain. |
 | `POST /internal/v1/partners` | Save a partner, initial client/site, instance assignment and setup work; return `202`. |
 | `GET /internal/v1/partners/{partner_id}` | Read the initial hierarchy, assigned instance and identity setup status. |
+| `GET /internal/v1/applications` | Read the complete global registry, including shared login-provider records. |
+| `GET /internal/v1/applications/{app_id}` | Read one application and its edit ETag. |
+| `POST /internal/v1/applications` | Create an application with normalized host claims; return `201`, or `200` on a creation replay. |
+| `PUT /internal/v1/applications/{app_id}` | Replace an application's editable definition, guarded by `If-Match`; return `200`. |
 | `GET /internal/v1/health` | Liveness, independent of PostgreSQL and Keycloak availability. |
 | `GET /internal/v1/health/ready` | PostgreSQL readiness with a two-second deadline. |
 
@@ -55,6 +59,33 @@ Retry a timed-out creation with the same `Idempotency-Key` and equivalent input.
 Timestamp fields use `*_ts_utc` names and RFC 3339 UTC values ending in `Z`. Record creation and update times come from Go's `time.Now().UTC()`. PostgreSQL stores them as `timestamptz`; application connections use UTC. Worker scheduling and lease comparisons use the database clock so replicas agree on deadlines.
 
 Partner and instance IDs use `1000–9999`. Client numbers are scoped to their partner, and site numbers to their client. Failed transactions roll back allocation. Committed IDs are never reused; exhaustion returns `id_capacity_exhausted`. Successful creation retries still work after exhaustion.
+
+## Application registry
+
+Operators create and edit global app definitions through the port-forwarded API. PostgreSQL is authoritative and startup leaves operator data intact. CP integration and importing its existing catalog are separate work.
+
+POST and PUT take the existing catalog-v3 definition without server-owned `id`, `meta.revision` or `meta.updated_at`. Omitted `meta` defaults to `{"schema_version":3}`. Go validates the complete definition against [the registry schema](src/storage/applications/definition.schema.json) before storage. GET responses wrap the full app under `app`, with `created_ts_utc` and `updated_ts_utc` alongside it. The app includes its permanent ID and server-managed `meta.revision`.
+
+```sh
+curl -i http://127.0.0.1:8002/internal/v1/applications \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: application-example-001' \
+  --data-binary @docs/examples/application.json
+
+curl -i http://127.0.0.1:8002/internal/v1/applications/APP_ID
+
+# Edit the input file, then use the exact ETag from GET (including quotes).
+curl -i -X PUT http://127.0.0.1:8002/internal/v1/applications/APP_ID \
+  -H 'Content-Type: application/json' \
+  -H 'If-Match: "APP_ID:1"' \
+  --data-binary @docs/examples/application.json
+```
+
+App IDs are 12 lowercase hexadecimal characters, independent of the four-digit customer hierarchy. Slugs and hostnames are trimmed and lowercased; IDNs become ASCII punycode, one trailing dot is removed, and `www` subdomain aliases are removed from exact resolver hosts. Registrable names such as `www.com` and `www.co.uk` are preserved. Host lists are sorted and deduplicated. Homepage order is retained. Wildcards such as `*.example.com` and `*-my.sharepoint.com` remain intact; Unicode labels containing a wildcard must be supplied as ASCII. Bare DNS names are required; URLs, ports, IP addresses and malformed DNS names are rejected.
+
+Each normalized host pattern belongs to exactly one app. A conflicting normalized pattern or slug returns `409`; a failed write leaves the previous definition, hosts, revision and timestamps intact. Distinct overlapping patterns are not identical claims: exact-over-wildcard matching remains a CP responsibility. Dependencies must refer to existing apps other than the edited app. There is no delete or partial-update route.
+
+GET collection returns `{"items":[...],"count":N}` in app-ID order, without pagination or filtering so CP can obtain the complete registry. GET and writes return a strong ETag for the selected app. PUT requires that exact tag: missing `If-Match` returns `428`, an outdated revision returns `412`, and malformed tags return `400`. Retrying POST with the same key and normalized input returns the same app's current record, even after an edit. Database failures return `503`, never an apparently successful empty registry.
 
 ## Keycloak setup
 
@@ -159,6 +190,7 @@ Pull requests and main pushes run Go checks, PostgreSQL integration, Helm checks
 | `src/cmd` | Startup, migrations and shutdown |
 | `src/storage/partners` | Partner records, transactions, identity setup and worker |
 | `src/storage/instances` | Registered instance addresses and availability |
+| `src/storage/applications` | Global app definitions, Go validation and host claims |
 | `src/storage/postgres`, `src/storage/schema` | Shared database pool and embedded migrations |
 | `src/internal/keycloak` | Typed Admin API transport and resources |
 | `src/internal/config` | Environment settings |

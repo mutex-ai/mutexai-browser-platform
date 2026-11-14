@@ -3,7 +3,7 @@
 ## Scope and design
 
 - Read the relevant [ADRs](docs/adrs/) before changing behavior. Proposed endpoints are not implemented features.
-- Keep this service focused on partner, client and site records, staff permissions, instance assignments and identity setup. Extension sessions, policies and telemetry belong to the instance backend.
+- Keep this service focused on partner, client and site records, staff permissions, instance assignments, identity setup and the global application registry. Extension sessions, policies and telemetry belong to the instance backend.
 - Build only the requested scope. Prefer direct code and existing libraries; add abstractions, configuration options or dependencies only for a current need. Preserve useful operational safeguards when simplifying.
 - Ask about changes to ownership, access rules or service responsibilities. Resolve routine implementation details using the existing design.
 - Keep documentation concise and factual. Use Mermaid for diagrams and leave Markdown prose unwrapped. Update the README when implemented behavior changes.
@@ -25,6 +25,7 @@
 - Identify people by registered realm/issuer and permanent user ID. Email is not an account identifier or permission check; its domain is a console discovery hint only.
 - Use `*_ts_utc` names for stored and returned timestamps, PostgreSQL `timestamptz`, and RFC 3339 UTC values in JSON.
 - Keep one authoritative representation of each stored record. Use separate request or response types when callers must not set or see stored fields. JSON names use `snake_case`.
+- Validate application definitions in Go with the existing catalog schema and normalize host claims before writing. PostgreSQL constraints enforce unique ownership across replicas. Global application IDs keep their 12-character hexadecimal format; customer hierarchy IDs remain four digits.
 - Add new embedded SQL migrations; do not rewrite published migrations. Keep migration history in `public.goose_db_version` and retain locking for concurrent startup.
 - Integration tests use a new disposable database. Never clear application data to make a test pass.
 

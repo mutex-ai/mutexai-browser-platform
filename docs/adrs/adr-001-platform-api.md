@@ -6,7 +6,7 @@
 
 **Related:** [ADR-000: Identity and access](adr-000-identity-and-access.md)
 
-**Scope:** Platform responsibilities, private access, PostgreSQL records, customer ID paths, MSP console realm discovery and reliable setup. Login and credential verification belong in separate authentication API ADRs.
+**Scope:** Platform responsibilities, private access, PostgreSQL records, customer ID paths, MSP console realm discovery and reliable setup. [ADR-002](adr-002-application-registry.md) adds the global application registry. Login and credential verification belong in separate authentication API ADRs.
 
 ## Context
 
@@ -20,13 +20,13 @@ Build one internal Go application per environment, backed by its own PostgreSQL 
 
 Platform has no public hostname, public ingress or publicly reachable API endpoint. The console server, registered instance services and approved operator tooling call it over private connections. Browsers and extensions never call it directly. The public console exposes specific staff operations; its server authenticates the user and forwards those operations to Platform over the private network. Console realm discovery is available before staff login, through the console server only.
 
-Private access does not establish permission. Platform verifies the calling service and, for staff actions, the person and their allowed partner, client or site. The authentication ADRs define how callers prove those identities.
+The current operator API relies on Kubernetes-authorized port forwarding without application authentication. Console integration must add verification of the calling service and, for staff actions, the person and their allowed partner, client or site. The authentication ADRs define how callers prove those identities.
 
 This separates customer records and setup from instance operation, following [Microsoft's control-plane guidance](https://learn.microsoft.com/en-us/azure/architecture/guide/multitenant/approaches/control-planes).
 
 ## C4 level 1: Mutex system context
 
-This [C4 system-context view](https://c4model.com/diagrams/system-context) shows Mutex as a whole. Platform is an internal part of that system.
+This [C4 system-context view](https://c4model.com/diagrams/system-context) shows Mutex, its users and external login systems.
 
 ```mermaid
 %%{init: {"theme": "neutral", "flowchart": {"wrappingWidth": 300}}}%%
@@ -56,7 +56,7 @@ flowchart TB
 
 ## C4 level 2: Platform and its connected applications
 
-This focused [C4 container view](https://c4model.com/diagrams/container) shows Platform and its connected applications. A C4 container is an application or data store. Each box names its technology and responsibility.
+This [C4 container view](https://c4model.com/diagrams/container) shows the applications, data store and their connections.
 
 ```mermaid
 %%{init: {"theme": "neutral", "flowchart": {"wrappingWidth": 300}}}%%
@@ -76,7 +76,7 @@ flowchart TB
         Private API and background setup tasks"]
         database[("Platform database
         [Container: PostgreSQL]
-        Ownership, permissions, assignments and setup work")]
+        Ownership, permissions, assignments, setup work and app definitions")]
         keycloak["Keycloak
         [Container: Keycloak]
         Human accounts, realms and company SSO"]
@@ -104,6 +104,7 @@ flowchart TB
 | Identity setup | Registered realm and organization relationships; requested SSO setup and its progress | Keycloak stores the actual login configuration. Instances perform extension enrollment. |
 | Console realm discovery | Registered MSP email domains mapped to their partner's Console realm | The console starts login; Keycloak authenticates the person. |
 | Change history | Who changed Platform records and the result of setup work | Device, policy and incident history remains in its instance. |
+| Global application registry | Shared app definitions, normalized host claims and safe operator edits, as defined in ADR-002 | Instance usage, policies, domain matching and cache integration. |
 
 MSP administrators with the required permissions create clients and sites and manage staff access within their partner. Mutex operators register partners and instances and select the instance for a client. A partner administrator cannot choose another partner, assign arbitrary infrastructure or grant access beyond their authority.
 
@@ -139,7 +140,7 @@ A client reference always includes `(partner_id, client_id)`. A site reference a
 
 These short IDs apply to the customer hierarchy and instance directory. Keycloak account IDs and extension `installation_id` values retain their existing identity-system formats. Request retry keys are metadata, not four-digit customer IDs.
 
-The table describes the intended management resources. The current implementation supports instance registration/read/availability and partner creation/read only; the README lists the implemented endpoints. Resource paths do not imply general editing or deletion support.
+The table describes the intended hierarchy resources. The [README](../../README.md#operator-api) lists implemented methods; the application registry is defined in [ADR-002](adr-002-application-registry.md). Other paths here remain proposed and do not imply general editing or deletion support.
 
 | Private path | Required operations |
 | --- | --- |
@@ -167,6 +168,8 @@ IDs are not renumbered or reused after retirement. Consequently, the four-digit 
 Platform alone writes its database. It does not write directly to Keycloak's database or any instance database. Store references to protected SSO secrets rather than putting them in ordinary customer records, responses or change history. The authentication ADRs define how those secrets are supplied and rotated.
 
 ## Private access
+
+The following service and staff checks are required before console integration.
 
 | Caller | Allowed responsibility |
 | --- | --- |
@@ -257,7 +260,8 @@ Platform is not called for each telemetry event and does not relay extension tra
 | Console server forwarding | Reuse it for supported Platform operations and the selected client's approved instance. Add console realm discovery before login; require staff authentication for management operations. |
 | Existing `platformapi` handlers | Keep devices, policies, incidents, reports and enrollment-token operations in the instance. |
 | Existing `/users` directory | Keep customer activity identities in the instance. It is not the new MSP staff-permission directory. |
-| Existing deployment tooling and application catalog | Continue using them. Platform does not become an infrastructure deployer or catalog service. |
+| Existing deployment tooling | Continue using it. Platform does not become an infrastructure deployer. |
+| Existing application catalog | ADR-002 adds PostgreSQL-backed registry APIs in Platform. CP's current catalog, matching and usage queries remain until their data-source integration is implemented. |
 
 Do not add billing, a central device database, global policy inheritance, cross-customer analytics or an event bus to this first version. Partner/client/site records, staff permissions and the instance directory are new Platform capabilities, not existing handlers that can simply be moved.
 
