@@ -43,7 +43,7 @@ func TestPartnerAPI(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store := &partnerStub{err: tc.err}
-			router := NewRouter(pingFunc(func(context.Context) error { return nil }), zap.NewNop(), store, nil)
+			router := NewRouter(pingFunc(func(context.Context) error { return nil }), zap.NewNop(), store, nil, nil)
 			r := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
 			r.Header.Set("Idempotency-Key", tc.key)
 			r.Header.Set("Content-Type", tc.content)

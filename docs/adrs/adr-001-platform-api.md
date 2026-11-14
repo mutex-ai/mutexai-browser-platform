@@ -6,7 +6,7 @@
 
 **Related:** [ADR-000: Identity and access](adr-000-identity-and-access.md)
 
-**Scope:** Platform responsibilities, private access, PostgreSQL records, customer ID paths, MSP console realm discovery and reliable setup. Login and credential verification belong in separate authentication API ADRs.
+**Scope:** Platform responsibilities, private access, PostgreSQL records, customer ID paths, MSP console realm discovery and reliable setup. [ADR-002](adr-002-application-registry.md) adds the global application registry. Login and credential verification belong in separate authentication API ADRs.
 
 ## Context
 
@@ -104,6 +104,7 @@ flowchart TB
 | Identity setup | Registered realm and organization relationships; requested SSO setup and its progress | Keycloak stores the actual login configuration. Instances perform extension enrollment. |
 | Console realm discovery | Registered MSP email domains mapped to their partner's Console realm | The console starts login; Keycloak authenticates the person. |
 | Change history | Who changed Platform records and the result of setup work | Device, policy and incident history remains in its instance. |
+| Global application registry | Shared app definitions, normalized host claims and safe operator edits, as defined in ADR-002 | Instance usage, policies, domain matching and cache integration. |
 
 MSP administrators with the required permissions create clients and sites and manage staff access within their partner. Mutex operators register partners and instances and select the instance for a client. A partner administrator cannot choose another partner, assign arbitrary infrastructure or grant access beyond their authority.
 
@@ -257,7 +258,8 @@ Platform is not called for each telemetry event and does not relay extension tra
 | Console server forwarding | Reuse it for supported Platform operations and the selected client's approved instance. Add console realm discovery before login; require staff authentication for management operations. |
 | Existing `platformapi` handlers | Keep devices, policies, incidents, reports and enrollment-token operations in the instance. |
 | Existing `/users` directory | Keep customer activity identities in the instance. It is not the new MSP staff-permission directory. |
-| Existing deployment tooling and application catalog | Continue using them. Platform does not become an infrastructure deployer or catalog service. |
+| Existing deployment tooling | Continue using it. Platform does not become an infrastructure deployer. |
+| Existing application catalog | ADR-002 adds PostgreSQL-backed registry APIs in Platform. CP's current catalog, matching and usage queries remain until their data-source integration is implemented. |
 
 Do not add billing, a central device database, global policy inheritance, cross-customer analytics or an event bus to this first version. Partner/client/site records, staff permissions and the instance directory are new Platform capabilities, not existing handlers that can simply be moved.
 

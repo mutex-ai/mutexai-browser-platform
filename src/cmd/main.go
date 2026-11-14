@@ -16,6 +16,7 @@ import (
 	"github.com/mutex-ai/mutexai-browser-platform/src/internal/config"
 	"github.com/mutex-ai/mutexai-browser-platform/src/internal/keycloak"
 	"github.com/mutex-ai/mutexai-browser-platform/src/server"
+	"github.com/mutex-ai/mutexai-browser-platform/src/storage/applications"
 	"github.com/mutex-ai/mutexai-browser-platform/src/storage/instances"
 	"github.com/mutex-ai/mutexai-browser-platform/src/storage/partners"
 	"github.com/mutex-ai/mutexai-browser-platform/src/storage/postgres"
@@ -84,7 +85,7 @@ func run() (runErr error) {
 	workerDone := make(chan struct{})
 	go func() { defer close(workerDone); partners.NewWorker(store, provisioner, log).Run(workerCtx) }()
 	defer func() { stopWorker(); <-workerDone }()
-	srv, err := server.New(server.Options{Cfg: cfg.Server, Handler: api.NewRouter(db, log, store, instances.NewStore(db)), Log: log})
+	srv, err := server.New(server.Options{Cfg: cfg.Server, Handler: api.NewRouter(db, log, store, instances.NewStore(db), applications.NewStore(db)), Log: log})
 	if err != nil {
 		return err
 	}

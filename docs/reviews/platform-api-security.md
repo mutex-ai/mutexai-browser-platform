@@ -45,6 +45,8 @@ The second adversarial pass kept the realm model, API routes and tenant-creation
 
 ## Threat checks
 
+Application definitions are normalized and validated in Go with the existing catalog schema before writes. Unique PostgreSQL indexes enforce app slugs and normalized host-pattern ownership across replicas; the app and host rows commit together. Tests cover concurrent creation retries, slug/host races, stale edit ETags, transaction rollback, schema rejection and UTC timestamps. Local Kubernetes tests exercise two actual replicas, preserve edits through restart, and verify safe `503` responses plus pool recovery after a database outage. Error responses omit SQL details. Registry operations retain the accepted private operator access model; CP integration and existing catalog import are separate changes.
+
 | Threat or failure | Control and evidence |
 | --- | --- |
 | Create a tenant with a missing or closed instance. | Check the instance inside the creation transaction under a shared row lock. A foreign key enforces the relationship. End-to-end tests reject these requests and confirm no tenant ID is consumed. |

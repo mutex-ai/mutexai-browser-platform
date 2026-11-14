@@ -57,5 +57,6 @@ func TestPostgresConcurrentMigrations(t *testing.T) {
 		t.Fatalf("migration history must not follow a changed search path: %v", err)
 	}
 	t.Run("partner storage", func(t *testing.T) { testPartners(t, db) })
+	t.Run("application registry", func(t *testing.T) { testApplications(t, db) })
 
 }
