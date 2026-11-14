@@ -2,15 +2,13 @@ package partners
 
 import (
 	"context"
-	"crypto/subtle"
 	"errors"
-	"net"
 	"net/http"
-	"net/url"
 	"slices"
 	"strconv"
 
 	"github.com/mutex-ai/mutexai-browser-platform/src/internal/keycloak"
+	"github.com/mutex-ai/mutexai-browser-platform/src/storage/instances"
 )
 
 var (
@@ -18,37 +16,11 @@ var (
 	ErrConfiguration = errors.New("existing keycloak configuration does not match this setup")
 )
 
-// SetupConfig contains environment-owned console configuration, never API input.
-type SetupConfig struct {
-	ConsoleURL    string
-	ConsoleSecret string
-}
+// Provisioner registers identity resources using the assigned instance's addresses.
+type Provisioner struct{ kc *keycloak.Client }
 
-// Provisioner configures the agreed two-realm layout through the Admin API.
-// It holds no database transaction or user login credential.
-type Provisioner struct {
-	kc     *keycloak.Client
-	origin string
-	secret string
-}
-
-// NewProvisioner validates the console origin and shared application credential.
-func NewProvisioner(kc *keycloak.Client, cfg SetupConfig) (*Provisioner, error) {
-	u, err := url.Parse(cfg.ConsoleURL)
-	if err != nil || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
-		return nil, errors.New("CONSOLE_URL must be a console origin without a path, credentials, query or fragment")
-	}
-	ip := net.ParseIP(u.Hostname())
-	local := u.Hostname() == "localhost" || ip != nil && ip.IsLoopback()
-	validTransport := u.Scheme == "https" || u.Scheme == "http" && local
-	if !validTransport {
-		return nil, errors.New("CONSOLE_URL requires HTTPS, except for local loopback development")
-	}
-	if len(cfg.ConsoleSecret) < 32 {
-		return nil, errors.New("CONSOLE_CLIENT_SECRET must contain at least 32 characters")
-	}
-	return &Provisioner{kc: kc, origin: u.Scheme + "://" + u.Host, secret: cfg.ConsoleSecret}, nil
-}
+// NewProvisioner shares the process's Admin API client.
+func NewProvisioner(kc *keycloak.Client) *Provisioner { return &Provisioner{kc: kc} }
 
 func apiStatus(err error, status int) bool {
 	var e *keycloak.APIError
@@ -72,6 +44,13 @@ func (p *Provisioner) Provision(ctx context.Context, job Job, partner Partner) (
 	if partner.PartnerID != job.PartnerID || !partner.Enabled {
 		return IdentityIDs{}, ErrOwnership
 	}
+	if partner.InstanceID < 1000 || partner.InstanceID > 9999 || partner.ConsoleClientID != instances.ConsoleClientID(partner.InstanceID) {
+		return IdentityIDs{}, ErrInstanceUnavailable
+	}
+	origin, err := instances.Origin(partner.ConsoleURL, true)
+	if err != nil {
+		return IdentityIDs{}, ErrConfiguration
+	}
 	console, sso := strconv.Itoa(job.PartnerID), strconv.Itoa(job.PartnerID)+"-sso"
 	cr, err := p.realm(ctx, console, false, ownership(job, "console"))
 	if err != nil {
@@ -81,7 +60,7 @@ func (p *Provisioner) Provision(ctx context.Context, job Job, partner Partner) (
 	if err != nil {
 		return IdentityIDs{}, err
 	}
-	resource := keycloak.Application{ClientID: "platform-api", Enabled: new(true), PublicClient: new(false), StandardFlowEnabled: new(false), ImplicitFlowEnabled: new(false), DirectAccessGrantsEnabled: new(false), ServiceAccountsEnabled: new(false), FullScopeAllowed: new(false), Attributes: ownership(job, "platform-api")}
+	resource := keycloak.Application{ClientID: "platform-api", Protocol: "openid-connect", Enabled: new(true), PublicClient: new(false), StandardFlowEnabled: new(false), ImplicitFlowEnabled: new(false), DirectAccessGrantsEnabled: new(false), ServiceAccountsEnabled: new(false), FullScopeAllowed: new(false), Attributes: ownership(job, "platform-api")}
 	api, err := p.application(ctx, console, resource)
 	if err != nil {
 		return IdentityIDs{}, err
@@ -121,29 +100,28 @@ func (p *Provisioner) Provision(ctx context.Context, job Job, partner Partner) (
 			return IdentityIDs{}, ErrConfiguration
 		}
 	}
-	attrs := ownership(job, "platform-ui")
+	attrs := ownership(job, partner.ConsoleClientID)
+	attrs["mutex.instance_id"] = strconv.Itoa(partner.InstanceID)
 	attrs["pkce.code.challenge.method"] = "S256"
-	attrs["post.logout.redirect.uris"] = p.origin + "/"
-	login := keycloak.Application{ClientID: "platform-ui", Secret: p.secret, Enabled: new(true), PublicClient: new(false), StandardFlowEnabled: new(true), ImplicitFlowEnabled: new(false), DirectAccessGrantsEnabled: new(false), ServiceAccountsEnabled: new(false), FullScopeAllowed: new(false), Attributes: attrs,
-		RedirectURIs: new([]string{p.origin + "/api/auth/callback/keycloak-" + console}), WebOrigins: new([]string{p.origin}),
+	attrs["use.jwks.url"] = "true"
+	attrs["jwks.url"] = instances.ConsoleJWKSURL(origin)
+	attrs["token.endpoint.auth.signing.alg"] = "RS256"
+	attrs["token.endpoint.auth.signing.max.exp"] = "60"
+	attrs["post.logout.redirect.uris"] = origin + "/"
+	login := keycloak.Application{ClientID: partner.ConsoleClientID, Protocol: "openid-connect", ClientAuthenticatorType: "client-jwt", Enabled: new(true), PublicClient: new(false), StandardFlowEnabled: new(true), ImplicitFlowEnabled: new(false), DirectAccessGrantsEnabled: new(false), ServiceAccountsEnabled: new(false), FullScopeAllowed: new(false), Attributes: attrs,
+		DefaultClientScopes: new([]string{"profile", "email", "roles"}), OptionalClientScopes: new([]string{}),
+		RedirectURIs: new([]string{origin + "/api/auth/callback/keycloak-" + console}), WebOrigins: new([]string{origin}),
 		ProtocolMappers: new([]keycloak.Mapper{{Name: "platform-api-audience", Protocol: "openid-connect", ProtocolMapper: "oidc-audience-mapper", Config: map[string]string{"included.client.audience": "platform-api", "access.token.claim": "true", "id.token.claim": "false"}}})}
 	ui, err := p.application(ctx, console, login)
 	if err != nil {
 		return IdentityIDs{}, err
-	}
-	secret, err := p.kc.ApplicationSecret(ctx, console, ui.ID)
-	if err != nil {
-		return IdentityIDs{}, err
-	}
-	if subtle.ConstantTimeCompare([]byte(secret), []byte(p.secret)) != 1 {
-		return IdentityIDs{}, ErrConfiguration
 	}
 	if err := p.kc.AllowClientRoles(ctx, console, ui.ID, api.ID, roles); err != nil {
 		return IdentityIDs{}, err
 	}
 	extAttrs := ownership(job, "browser-extension")
 	extAttrs["pkce.code.challenge.method"] = "S256"
-	_, err = p.application(ctx, sso, keycloak.Application{ClientID: "browser-extension", Enabled: new(true), PublicClient: new(true), StandardFlowEnabled: new(true), ImplicitFlowEnabled: new(false), DirectAccessGrantsEnabled: new(false), ServiceAccountsEnabled: new(false), FullScopeAllowed: new(false), Attributes: extAttrs, RedirectURIs: new([]string{"https://cb.mutex.ai/ext/oauth/cb"})})
+	_, err = p.application(ctx, sso, keycloak.Application{ClientID: "browser-extension", Protocol: "openid-connect", Enabled: new(true), PublicClient: new(true), StandardFlowEnabled: new(true), ImplicitFlowEnabled: new(false), DirectAccessGrantsEnabled: new(false), ServiceAccountsEnabled: new(false), FullScopeAllowed: new(false), Attributes: extAttrs, RedirectURIs: new([]string{"https://cb.mutex.ai/ext/oauth/cb"})})
 	if err != nil {
 		return IdentityIDs{}, err
 	}
@@ -183,6 +161,18 @@ func (p *Provisioner) Provision(ctx context.Context, job Job, partner Partner) (
 	if err != nil {
 		return IdentityIDs{}, err
 	}
+	// Retire only an old global-console registration owned by this exact setup.
+	legacy, legacyErr := p.kc.FindApplication(ctx, console, "platform-ui")
+	if legacyErr == nil {
+		if !owns(legacy.Attributes, ownership(job, "platform-ui")) {
+			return IdentityIDs{}, ErrOwnership
+		}
+		if err := p.kc.UpdateApplication(ctx, console, legacy.ID, keycloak.Application{Enabled: new(false)}); err != nil {
+			return IdentityIDs{}, err
+		}
+	} else if !apiStatus(legacyErr, http.StatusNotFound) {
+		return IdentityIDs{}, legacyErr
+	}
 	if err := p.kc.UpdateRealm(ctx, console, keycloak.Realm{Enabled: new(true)}); err != nil {
 		return IdentityIDs{}, err
 	}
@@ -192,7 +182,7 @@ func (p *Provisioner) Provision(ctx context.Context, job Job, partner Partner) (
 func (p *Provisioner) realm(ctx context.Context, name string, sso bool, owner map[string]string) (*keycloak.Realm, error) {
 	r, err := p.kc.GetRealm(ctx, name)
 	if apiStatus(err, http.StatusNotFound) {
-		err = p.kc.CreateRealm(ctx, keycloak.Realm{Name: name, Enabled: new(false), OrganizationsEnabled: new(sso), RegistrationAllowed: new(false), ResetPasswordAllowed: new(false), LoginWithEmail: new(true), BruteForceProtected: new(true), SSLRequired: "external", AccessTokenLifespan: new(300), SSOSessionIdleTimeout: new(1800), SSOSessionMaxLifespan: new(28800), Attributes: owner})
+		err = p.kc.CreateRealm(ctx, keycloak.Realm{Name: name, Enabled: new(false), OrganizationsEnabled: new(sso), RegistrationAllowed: new(false), ResetPasswordAllowed: new(false), LoginWithEmail: new(true), BruteForceProtected: new(true), SSLRequired: "external", PasswordPolicy: "length(15)", AccessTokenLifespan: new(300), SSOSessionIdleTimeout: new(1800), SSOSessionMaxLifespan: new(28800), Attributes: owner})
 		if err != nil && !apiStatus(err, http.StatusConflict) {
 			return nil, err
 		}
@@ -204,7 +194,17 @@ func (p *Provisioner) realm(ctx context.Context, name string, sso bool, owner ma
 	if !owns(r.Attributes, owner) {
 		return nil, ErrOwnership
 	}
-	if r.OrganizationsEnabled == nil || *r.OrganizationsEnabled != sso || r.RegistrationAllowed == nil || *r.RegistrationAllowed || r.SSLRequired != "external" {
+	if r.OrganizationsEnabled == nil || *r.OrganizationsEnabled != sso || r.RegistrationAllowed == nil || *r.RegistrationAllowed || r.SSLRequired != "external" || r.PasswordPolicy != "length(15)" {
+		return nil, ErrConfiguration
+	}
+	if r.ResetPasswordAllowed == nil || *r.ResetPasswordAllowed ||
+		r.LoginWithEmail == nil || !*r.LoginWithEmail ||
+		r.BruteForceProtected == nil || !*r.BruteForceProtected {
+		return nil, ErrConfiguration
+	}
+	if r.AccessTokenLifespan == nil || *r.AccessTokenLifespan != 300 ||
+		r.SSOSessionIdleTimeout == nil || *r.SSOSessionIdleTimeout != 1800 ||
+		r.SSOSessionMaxLifespan == nil || *r.SSOSessionMaxLifespan != 28800 {
 		return nil, ErrConfiguration
 	}
 	if sso && (r.Enabled == nil || *r.Enabled) {
@@ -224,11 +224,25 @@ func (p *Provisioner) application(ctx context.Context, realm string, want keyclo
 	if err != nil {
 		return nil, err
 	}
-	if !owns(app.Attributes, want.Attributes) {
+	owner := map[string]string{}
+	for _, name := range []string{"mutex.setup_id", "mutex.partner_id", "mutex.purpose", "mutex.instance_id"} {
+		if value, ok := want.Attributes[name]; ok {
+			owner[name] = value
+		}
+	}
+	if !owns(app.Attributes, owner) {
 		return nil, ErrOwnership
+	}
+	if !owns(app.Attributes, want.Attributes) || app.Protocol != want.Protocol || (want.ClientAuthenticatorType != "" && app.ClientAuthenticatorType != want.ClientAuthenticatorType) {
+		return nil, ErrConfiguration
 	}
 	for _, pair := range [][2]*bool{{app.Enabled, want.Enabled}, {app.PublicClient, want.PublicClient}, {app.StandardFlowEnabled, want.StandardFlowEnabled}, {app.ImplicitFlowEnabled, want.ImplicitFlowEnabled}, {app.DirectAccessGrantsEnabled, want.DirectAccessGrantsEnabled}, {app.ServiceAccountsEnabled, want.ServiceAccountsEnabled}, {app.FullScopeAllowed, want.FullScopeAllowed}} {
 		if pair[0] == nil || pair[1] == nil || *pair[0] != *pair[1] {
+			return nil, ErrConfiguration
+		}
+	}
+	for _, scopes := range [][2]*[]string{{app.DefaultClientScopes, want.DefaultClientScopes}, {app.OptionalClientScopes, want.OptionalClientScopes}} {
+		if scopes[1] != nil && (scopes[0] == nil || !sameStrings(*scopes[0], *scopes[1])) {
 			return nil, ErrConfiguration
 		}
 	}
@@ -296,4 +310,11 @@ func (p *Provisioner) organization(ctx context.Context, realm string, job Job, n
 		return nil, ErrConfiguration
 	}
 	return org, nil
+}
+
+func sameStrings(actual, expected []string) bool {
+	a, b := slices.Clone(actual), slices.Clone(expected)
+	slices.Sort(a)
+	slices.Sort(b)
+	return slices.Equal(a, b)
 }

@@ -12,7 +12,7 @@ permissions:
 
 env:
   GOWORK: 'off'
-  GO_VERSION: '1.26.1'
+  GO_VERSION: '1.26.11'
   IMAGE_NAME: mutexai-browser-platform
   CHART_DIR: charts/browser-platform
 
@@ -56,6 +56,8 @@ jobs:
           version: v2.12.2
       - name: Unit and database tests
         run: go test ./... -race -count=1 -timeout 5m
+      - name: Vulnerability check
+        run: make security
 
   helm:
     name: Helm checks

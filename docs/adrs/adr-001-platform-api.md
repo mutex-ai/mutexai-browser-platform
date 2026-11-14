@@ -69,7 +69,7 @@ flowchart TB
     Registers partners and instances"]
     subgraph mutex["Mutex browser security — system boundary"]
         console["Console server
-        [Container: Next.js]
+        [Container: Next.js, per instance]
         Screens and permitted staff actions"]
         platform["Platform API
         [Container: Go]
@@ -90,7 +90,6 @@ flowchart TB
     console -->|"Client devices and policies: private HTTPS"| backend
     platform -->|"Reads and writes owned records: PostgreSQL over TLS"| database
     platform -->|"Creates realms, organizations and SSO settings: private HTTPS Admin API"| keycloak
-    backend -->|"Reads assigned configuration and reports applied revision: private HTTPS"| platform
 ```
 
 **Key:** The boundary contains Mutex applications. Rectangles are applications; the cylinder is a database. Arrows point from caller to dependency. Platform and its database are private. Public console and login interfaces are separate. Login flows, the extension and instance storage are omitted here; see ADR-000 for their responsibilities.
@@ -101,7 +100,7 @@ flowchart TB
 | --- | --- | --- |
 | Customer directory | Partners, clients, sites and their relationships | Instance device records and telemetry. |
 | Staff access | References to console users and their permitted actions and customer/site access | Keycloak owns human accounts and login. Each service enforces access to its own resources. |
-| Instance directory | Instance IDs, approved addresses, availability for new assignments and each client's assigned instance | Existing infrastructure tooling creates and operates deployments. |
+| Instance directory | Instance IDs, approved console and backend addresses, availability for new assignments and each client's assigned instance | Existing infrastructure tooling creates and operates deployments. |
 | Identity setup | Registered realm and organization relationships; requested SSO setup and its progress | Keycloak stores the actual login configuration. Instances perform extension enrollment. |
 | Console realm discovery | Registered MSP email domains mapped to their partner's Console realm | The console starts login; Keycloak authenticates the person. |
 | Change history | Who changed Platform records and the result of setup work | Device, policy and incident history remains in its instance. |
@@ -110,9 +109,11 @@ MSP administrators with the required permissions create clients and sites and ma
 
 The first partner administrator is assigned by an authorized Mutex operator. Partner membership is not inferred from an email domain or from being the first person to log in.
 
-Partner bootstrap creates the partner, initial client `1000` and initial site `1000` together. These are ordinary client and site records, not a shared bucket for unrelated customers. Their names are supplied during setup. MSP administrators can create further clients and sites through the console; no separate bootstrap endpoint is needed.
+Partner bootstrap requires a registered instance and creates the partner, initial client `1000`, initial site `1000` and client assignment together. These are ordinary client and site records, not a shared bucket for unrelated customers. Their names are supplied during setup. MSP administrators can create further clients and sites through the console; no separate bootstrap endpoint is needed.
 
 The existing browser backend keeps policy editing and delivery, device approval and reset, enrollment credentials, application usage, incidents and reports. Platform does not proxy those operations or access instance ClickHouse and Redis databases. The console server uses Platform's approved assignment to reach the correct instance, and the instance checks the request itself.
+
+Each instance has its own console origin. One instance can serve clients from several partners. Platform derives its console client ID as `platform-ui-{instance_id}` and its public-key URL as `{console_url}/.well-known/jwks.json`; callers do not supply credentials or arbitrary key URLs during registration. The same instance client ID is registered separately in each partner Console realm it serves. Signed client assertions let that UI use one signing key across those registrations. Platform registers the public-key source and never holds the UI's private key. UI login, refresh, logout and key publication belong to the console implementation.
 
 ## IDs and URL paths
 
@@ -136,24 +137,22 @@ For example, both partners below may have a client `1000` and a site `1000`. The
 
 A client reference always includes `(partner_id, client_id)`. A site reference always includes `(partner_id, client_id, site_id)`. This applies to API bodies, database relationships, configuration sent to instances, permission checks, logs and cached results. A bare `client_id` or `site_id` is not a complete identity.
 
-These short IDs apply to the customer hierarchy and instance directory. Keycloak account IDs and extension `installation_id` values retain their existing identity-system formats. Configuration revisions and request retry keys are metadata, not four-digit customer IDs.
+These short IDs apply to the customer hierarchy and instance directory. Keycloak account IDs and extension `installation_id` values retain their existing identity-system formats. Request retry keys are metadata, not four-digit customer IDs.
 
-The initial API supports the following operations. Resource paths do not imply general editing or deletion support.
+The table describes the intended management resources. The current implementation supports instance registration/read/availability and partner creation/read only; the README lists the implemented endpoints. Resource paths do not imply general editing or deletion support.
 
 | Private path | Required operations |
 | --- | --- |
 | `/internal/v1/partners` | Operator creates a partner with its initial client and site. |
 | `/internal/v1/partners/{partner_id}` | Read the permitted partner record; operators control its enabled state. |
 | `/internal/v1/partners/{partner_id}/clients` | List permitted clients or create a client under this partner. |
-| `/internal/v1/partners/{partner_id}/clients/{client_id}` | Read or update permitted client details. Initial instance assignment is operator-only. |
+| `/internal/v1/partners/{partner_id}/clients/{client_id}` | Read or update permitted client details. Creation includes the approved instance; ordinary updates do not move clients. |
 | `/internal/v1/partners/{partner_id}/clients/{client_id}/sites` | List permitted sites or create a site under this client. |
 | `/internal/v1/partners/{partner_id}/clients/{client_id}/sites/{site_id}` | Read or update permitted site details. |
 | `/internal/v1/console/realm-discovery` | Console server submits an email domain and receives its registered partner and Console realm. |
-| `/internal/v1/instances/{instance_id}` | Operator reads or updates the registered instance's approved addresses and availability for new assignments. |
-| `/internal/v1/instances/{instance_id}/assignments` | Instance reads its assigned clients, sites and required identity settings. |
-| `/internal/v1/instances/{instance_id}/applied-revision` | Instance reports which configuration revision it has applied. |
+| `/internal/v1/instances/{instance_id}` | Operator reads the registered instance or changes its availability for new assignments. Address changes require a coordinated login-configuration workflow. |
 
-Use `GET` for reads and lists, `POST` for creation, realm discovery and revision acknowledgement, and `PATCH` for permitted record updates. Operator instance registration uses `POST /internal/v1/instances`. Staff-permission operations remain required, but their contract belongs with the authentication ADRs. A dedicated client SSO management endpoint is deferred until its workflow is defined.
+Use `GET` for reads and lists, `POST` for creation and realm discovery, and `PATCH` for permitted record updates. Operator instance registration uses `POST /internal/v1/instances`. Staff-permission operations remain required, but their contract belongs with the authentication ADRs. A dedicated client SSO management endpoint is deferred until its workflow is defined.
 
 Creation uses the parent collection, such as `POST /internal/v1/partners/1000/clients`; Platform allocates the new number. Callers cannot override the parent from a request body. Lookups use the complete parent path and never fall back to searching by a client or site number alone. Short IDs are easy to guess, so permission checks are required for every lookup and change.
 
@@ -172,7 +171,7 @@ Platform alone writes its database. It does not write directly to Keycloak's dat
 | Caller | Allowed responsibility |
 | --- | --- |
 | Console server | Resolve a registered console realm before login; perform management operations only for a verified console user within that person's permissions. |
-| Registered browser backend | Read only its own assignments and report its own applied revision. Permission lookup, if required by the authentication design, must also be restricted to its assigned clients. |
+| Registered browser backend | Future integration must restrict configuration and permission lookup to clients assigned to that instance. Its delivery contract is deferred. |
 | Approved operator tooling | Perform explicitly authorized partner, instance and initial-administrator setup. |
 
 Bind the service identity to its permitted role and, for a browser backend, its registered `instance_id`. An instance cannot read another instance's configuration by changing the URL. Platform independently checks the staff identity supplied through the console; the console's service identity alone does not grant partner-wide access.
@@ -212,56 +211,36 @@ This illustrates responsibilities, not the authentication protocol. The console 
 
 Reuse the existing console server for this flow; no discovery service is needed. This follows the established [home realm discovery pattern](https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/home-realm-discovery-policy). The authentication ADR will define the login exchange and protection of the public discovery entry point. Extension SSO discovery and client employee console access are deferred; this endpoint serves neither case.
 
-## Customer setup and instance configuration
+## Customer setup
 
-Platform records the requested client and its parent before making external changes. It records the setup task and the change history in the same PostgreSQL transaction. Setup waits for an operator to assign an eligible instance. The client remains in setup until required identity configuration exists and the assigned instance has applied its configuration.
+Register an instance before creating a partner. Partner creation includes `instance_id` and saves the partner, initial client, initial site, client assignment, setup task and change history in one PostgreSQL transaction. One instance can serve clients from several partners. Sites inherit their client's assignment.
 
-Background tasks create or verify the required Keycloak organization under the partner's registered Client SSO realm. A client using only managed deployment does not need an SSO connection. Reuse the resulting realm and organization IDs on retries. Do not treat an unrelated resource with a matching display name as the client's resource. A failed client setup must not block completed configurations or access-removal updates for other clients.
-
-Instances pull their configuration from Platform's private API. Each response contains the full ownership paths, registered identity relationships, enabled/disabled states and a revision. Instances retain a local copy for normal operation and acknowledge a revision only after validating and applying it. Platform exposes readiness separately from the requested configuration.
-
-### Runtime sequence: create a client
-
-This sequence shows application interactions for setup. It is a dynamic view, not another C4 structural level.
+Background setup creates or verifies the two partner realms, the assigned instance's console client and the initial client organization. A client using managed deployment does not need a company SSO connection. Save the permanent identity references and reuse them on retries; a matching display name alone does not prove ownership.
 
 ```mermaid
-%%{init: {"theme": "neutral", "sequence": {"wrap": true, "messageMargin": 35}}}%%
 sequenceDiagram
     actor Operator as Mutex operator
-    participant Console as Console server
     participant Platform as Platform API
     participant DB as PostgreSQL
     participant KC as Keycloak
-    participant Instance as Assigned browser backend
-    Console->>Platform: Create client under permitted partner
-    Platform->>Platform: Verify caller and parent
-    Platform->>DB: Allocate ID and save client, setup task and change history
-    DB-->>Platform: Transaction committed
-    Platform-->>Console: Client ID and setup status
-    Operator->>Platform: Assign an eligible instance through private tooling
-    Platform->>DB: Save assignment and make setup task runnable
-    Note over Platform: Background task in the same application
-    Platform->>KC: Create or verify organization and any requested SSO connection
-    KC-->>Platform: Organization ID and setup result
-    Platform->>DB: Save identity mapping and publish complete configuration revision
-    Instance->>Platform: Request own assigned configuration
-    Platform-->>Instance: Client and sites with identity settings and revision
-    Instance->>Instance: Validate and apply configuration
-    Instance->>Platform: Acknowledge applied revision
-    Platform->>DB: Record applied revision and client readiness
-    Console->>Platform: Read client setup status
-    Platform-->>Console: Ready after required setup and matching acknowledgement
+    Operator->>Platform: Register an instance with approved URLs
+    Platform->>DB: Allocate and save instance
+    Platform-->>Operator: instance_id
+    Operator->>Platform: Create partner with instance_id
+    Platform->>DB: Save hierarchy, assignment and setup task together
+    Platform-->>Operator: Partner IDs and pending setup status
+    Platform->>KC: Create or verify realms, console client and organization
+    KC-->>Platform: Permanent identity references
+    Platform->>DB: Save references and complete setup
+    Operator->>Platform: Read partner
+    Platform-->>Operator: Assigned instance and identity setup status
 ```
 
-The operator's initial assignment is a private Platform operation on the client record. MSP-created clients wait for this assignment; they cannot select arbitrary infrastructure. Partner setup must also be complete before the client organization can be created.
+Setup tasks survive application restarts. PostgreSQL coordinates replicas with expiring leases. External calls have deadlines, and retries do not hold a transaction open during network calls. A replaced worker cannot complete an older attempt.
 
-Setup tasks survive application restarts. If several Platform replicas are running, PostgreSQL coordinates which replica owns a task. External calls have timeouts, and failed work can be retried without keeping a database transaction open during a network call. The saved task and resource identifiers let a retry check whether an earlier call succeeded before repeating it.
+Configuration delivery to instances and confirmation that they have applied it are deferred until the browser-backend integration is defined. There is no assignment-fetch or revision-acknowledgement API in this scope. Identity setup completion does not claim that a UI or instance has applied its configuration.
 
-Changes are revision-checked. An old acknowledgement cannot mark a newer configuration ready, and an instance cannot acknowledge another instance's work. Concurrent updates based on an old record version are rejected rather than silently replacing a newer change.
-
-Disabling a partner, client or site must appear explicitly in the affected instance configuration. It must not be represented only by deleting a row that an instance may have cached. Instances apply parent restrictions to their children. Platform reports the requested state and the last acknowledged state separately, so a request to disable access is not presented as already enforced.
-
-Initial assignment is supported. Moving an active client to another instance, moving clients between partners, and permanent data deletion require separate lifecycle designs. An ordinary edit cannot change these ownership relationships.
+Moving an active client to another instance, moving clients between partners and permanent deletion require separate lifecycle designs. Ordinary updates cannot change ownership or assignment.
 
 ## Failures and service independence
 
@@ -309,15 +288,13 @@ This review checks the design against failure and misuse scenarios. It is not a 
 | A creation response is lost and retried | The recorded request key returns the same client and setup result. |
 | An ID range reaches `9999` | Reject the next allocation explicitly; never wrap, reuse or silently expand the ID. |
 | A caller guesses another partner's path | Authorization rejects access before returning or changing that partner's records. |
-| An instance changes the ID in its assignment URL | Its authenticated service identity still restricts it to its registered instance. |
 | Keycloak succeeds, then Platform stops before saving the result | A retry identifies and verifies the previously created resource; it does not create another organization or adopt one by display name alone. |
 | Database commit succeeds, then the application restarts | The persisted setup task remains available for retry. |
 | Keycloak setup fails for one client | Record the failure and keep that setup incomplete. Other clients continue with completed configurations; access-removal updates are not blocked. |
 | PostgreSQL is unavailable during a change | Reject the operation rather than claim the requested change was saved. |
-| An older setup task or acknowledgement arrives late | Revision checks prevent it from overwriting newer intent or marking it ready. |
+| An older setup task completes late | Its expired or replaced lease prevents it from recording completion. |
 | Staff permission is removed while the console remains open | Services enforce the updated permission within the authentication ADR's limit; the console session alone cannot preserve access. |
-| A partner is disabled while its instance is disconnected | Requested and applied status remain distinct. The instance cannot continue indefinitely beyond its allowed configuration validity. |
-| An MSP tries to create a customer on an unapproved instance | Platform rejects the selection or keeps setup awaiting an approved assignment. |
+| An MSP tries to create a customer on an unapproved instance | Platform rejects creation before saving the hierarchy or allocating IDs. |
 | A setup error contains a secret | Return a safe error summary and reference; keep credentials out of responses and ordinary logs. |
 | A client uses managed enrollment without SSO | Setup requires the client organization and instance configuration, but no company login connection. |
 

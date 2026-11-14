@@ -9,14 +9,60 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mutex-ai/mutexai-browser-platform/src/partners"
+	"github.com/mutex-ai/mutexai-browser-platform/src/storage/instances"
+	"github.com/mutex-ai/mutexai-browser-platform/src/storage/partners"
 )
 
 func testPartners(t *testing.T, db *sql.DB) {
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
+	// Record timestamps must come from Go even when a SQL default differs.
+	if _, err := db.ExecContext(ctx, `ALTER TABLE platform.instances ALTER COLUMN created_ts_utc SET DEFAULT '2000-01-01T00:00:00Z';
+ ALTER TABLE platform.partners ALTER COLUMN created_ts_utc SET DEFAULT '2000-01-01T00:00:00Z';
+ ALTER TABLE platform.changes ALTER COLUMN created_ts_utc SET DEFAULT '2000-01-01T00:00:00Z';
+ ALTER TABLE platform.partner_setup ALTER COLUMN updated_ts_utc SET DEFAULT '2000-01-01T00:00:00Z';`); err != nil {
+		t.Fatal(err)
+	}
 	store := partners.NewStore(db)
-	in := partners.CreateInput{Name: "MSP", ClientName: "Default", SiteName: "Office", ConsoleDomains: []string{"ACME.EXAMPLE."}}
+	registry := instances.NewStore(db)
+	instanceInput := instances.CreateInput{Name: "Shared", ConsoleURL: "https://console-a.example.test", BackendURL: "https://api-a.example.test"}
+	instance, _, err := registry.Create(ctx, "instance-a", instanceInput)
+	if err != nil || instance.InstanceID != 1000 {
+		t.Fatalf("instance registration failed: %v", err)
+	}
+	if same, replayed, err := registry.Create(ctx, "instance-a", instanceInput); err != nil || !replayed || same.InstanceID != 1000 {
+		t.Fatal("instance retry was not idempotent")
+	}
+	changedInstance := instanceInput
+	changedInstance.Name = "Different"
+	if _, _, err := registry.Create(ctx, "instance-a", changedInstance); !errors.Is(err, instances.ErrRequestConflict) {
+		t.Fatal("instance retry with changed input was accepted")
+	}
+	if _, _, err := registry.Create(ctx, "duplicate-console", instanceInput); !errors.Is(err, instances.ErrConsoleConflict) {
+		t.Fatal("console origin was assigned to two instances")
+	}
+	if instance.CreatedTSUTC.IsZero() || instance.CreatedTSUTC.Location() != time.UTC {
+		t.Fatal("instance creation timestamp is missing or not UTC")
+	}
+	var timestampType string
+	var current bool
+	if err := db.QueryRowContext(ctx, `SELECT pg_typeof(created_ts_utc)::text,
+ abs(extract(epoch FROM created_ts_utc)-extract(epoch FROM statement_timestamp()))<5
+ FROM platform.instances WHERE instance_id=1000`).Scan(&timestampType, &current); err != nil || timestampType != "timestamp with time zone" || !current {
+		t.Fatalf("application timestamp did not save the current instant: %v", err)
+	}
+	instanceInput.ConsoleURL = "https://console-b.example.test"
+	instanceInput.BackendURL = "https://api-b.example.test"
+	if second, _, err := registry.Create(ctx, "instance-b", instanceInput); err != nil || second.InstanceID != 1001 {
+		t.Fatal("second instance was not registered")
+	}
+	instanceInput.ConsoleURL = "https://console-c.example.test"
+	instanceInput.AcceptingClients = new(false)
+	if _, _, err := registry.Create(ctx, "instance-c", instanceInput); err != nil {
+		t.Fatal(err)
+	}
+
+	in := partners.CreateInput{InstanceID: 1000, Name: "MSP", ClientName: "Default", SiteName: "Office", ConsoleDomains: []string{"ACME.EXAMPLE."}}
 	var wg sync.WaitGroup
 	results := make(chan partners.Partner, 8)
 	failures := make(chan error, 8)
@@ -37,8 +83,11 @@ func testPartners(t *testing.T, db *sql.DB) {
 		t.Fatal(err)
 	}
 	for p := range results {
-		if p.PartnerID != 1000 || p.ClientID != 1000 || p.SiteID != 1000 || p.SetupStatus != "pending" {
+		if p.PartnerID != 1000 || p.ClientID != 1000 || p.SiteID != 1000 || p.SetupStatus != "pending" || p.InstanceID != 1000 || p.ConsoleURL != "https://console-a.example.test" {
 			t.Fatalf("incorrect bootstrap IDs/status: %+v", p)
+		}
+		if p.CreatedTSUTC.IsZero() || p.CreatedTSUTC.Location() != time.UTC {
+			t.Fatal("partner creation timestamp is missing or not UTC")
 		}
 	}
 	changed := in
@@ -53,6 +102,25 @@ func testPartners(t *testing.T, db *sql.DB) {
 	second, _, err := store.Create(ctx, "second-key", in)
 	if err != nil || second.PartnerID != 1001 {
 		t.Fatalf("failed creation consumed an ID: %v", err)
+	}
+	bad := in
+	bad.ConsoleDomains = []string{"unavailable.example"}
+	bad.InstanceID = 1002
+	if _, _, err := store.Create(ctx, "unavailable", bad); !errors.Is(err, partners.ErrInstanceUnavailable) {
+		t.Fatal("unavailable instance accepted")
+	}
+	bad.InstanceID = 9998
+	if _, _, err := store.Create(ctx, "missing-instance", bad); !errors.Is(err, partners.ErrInstanceUnavailable) {
+		t.Fatal("unknown instance accepted")
+	}
+	if _, err := registry.SetAvailability(ctx, 1000, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, replayed, err := store.Create(ctx, "same-key", partners.CreateInput{InstanceID: 1000, Name: "MSP", ClientName: "Default", SiteName: "Office", ConsoleDomains: []string{"acme.example"}}); err != nil || !replayed {
+		t.Fatal("replay failed when instance stopped accepting assignments")
+	}
+	if _, err := registry.SetAvailability(ctx, 1000, true); err != nil {
+		t.Fatal(err)
 	}
 	var orphanCount int
 	if err := db.QueryRowContext(ctx, "SELECT count(*) FROM platform.partners").Scan(&orphanCount); err != nil || orphanCount != 2 {
@@ -69,7 +137,7 @@ func testPartners(t *testing.T, db *sql.DB) {
 	if _, err := store.Claim(ctx); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatal("leased task was claimed again")
 	}
-	if _, err := db.ExecContext(ctx, "UPDATE platform.partner_setup SET lease_until=now()-interval '1 second' WHERE partner_id=$1", job.PartnerID); err != nil {
+	if _, err := db.ExecContext(ctx, "UPDATE platform.partner_setup SET lease_expires_ts_utc=now()-interval '1 second' WHERE partner_id=$1", job.PartnerID); err != nil {
 		t.Fatal(err)
 	}
 	recovered, err := store.Claim(ctx)
@@ -94,8 +162,39 @@ func testPartners(t *testing.T, db *sql.DB) {
 		t.Fatal(err)
 	}
 	failed, err := store.Get(ctx, other.PartnerID)
-	if err != nil || failed.SetupError != "keycloak_access_denied" || failed.RetryAt == nil {
+	if err != nil || failed.SetupError != "keycloak_access_denied" || failed.RetryTSUTC == nil || failed.RetryTSUTC.Location() != time.UTC {
 		t.Fatal("safe failure and retry were not persisted")
+	}
+	// Model a record retained by the upgrade from the unassigned schema.
+	if _, err := db.ExecContext(ctx, `ALTER TABLE platform.clients DROP CONSTRAINT clients_require_instance;
+ UPDATE platform.clients SET instance_id=NULL WHERE partner_id=1001 AND client_id=1000;
+ ALTER TABLE platform.clients ADD CONSTRAINT clients_require_instance CHECK(instance_id IS NOT NULL) NOT VALID;`); err != nil {
+		t.Fatal(err)
+	}
+	legacy, err := store.Get(ctx, 1001)
+	if err != nil || legacy.SetupStatus != "assignment_required" {
+		t.Fatal("legacy missing assignment was hidden")
+	}
+	if _, err := store.Claim(ctx); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatal("unassigned legacy record was processed")
+	}
+	if _, err := registry.SetAvailability(ctx, 9998, false); !errors.Is(err, instances.ErrNotFound) {
+		t.Fatal("missing instance update was accepted")
+	}
+	if _, err := db.ExecContext(ctx, "UPDATE platform.id_counters SET next_id=9999 WHERE scope='instances'"); err != nil {
+		t.Fatal(err)
+	}
+	instanceInput.ConsoleURL = "https://console-last.example.test"
+	if last, _, err := registry.Create(ctx, "last-instance", instanceInput); err != nil || last.InstanceID != 9999 {
+		t.Fatalf("last instance ID was not allocated: %v", err)
+	}
+	instanceInput.ConsoleURL = "https://console-exhausted.example.test"
+	if _, _, err := registry.Create(ctx, "exhausted-instance", instanceInput); !errors.Is(err, instances.ErrCapacity) {
+		t.Fatal("instance ID range wrapped or expanded")
+	}
+	instanceInput.ConsoleURL = "https://console-last.example.test"
+	if _, replayed, err := registry.Create(ctx, "last-instance", instanceInput); err != nil || !replayed {
+		t.Fatal("instance retry failed after capacity exhaustion")
 	}
 	if _, err := db.ExecContext(ctx, "UPDATE platform.id_counters SET next_id=9999 WHERE scope='partners'"); err != nil {
 		t.Fatal(err)

@@ -2,17 +2,14 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"io"
-	"mime"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
-	"github.com/mutex-ai/mutexai-browser-platform/src/partners"
+
+	"github.com/mutex-ai/mutexai-browser-platform/src/storage/partners"
 	"go.uber.org/zap"
 )
 
@@ -24,31 +21,12 @@ type PartnerStore interface {
 
 func partnerRoutes(r *mux.Router, store PartnerStore, log *zap.Logger) {
 	r.HandleFunc("/internal/v1/partners", func(w http.ResponseWriter, r *http.Request) {
-		kind, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-		if err != nil || kind != "application/json" {
-			writeError(w, 415, "unsupported_media_type", "Content-Type must be application/json")
+		key, ok := creationKey(w, r)
+		if !ok {
 			return
 		}
-		key := r.Header.Get("Idempotency-Key")
-		if key == "" || len(key) > 128 || strings.ContainsFunc(key, func(c rune) bool { return c < 33 || c > 126 }) {
-			writeError(w, 400, "invalid_request", "Idempotency-Key must contain 1 to 128 visible ASCII characters")
-			return
-		}
-		r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
-		decoder := json.NewDecoder(r.Body)
-		decoder.DisallowUnknownFields()
 		var in partners.CreateInput
-		if err := decoder.Decode(&in); err != nil {
-			var tooLarge *http.MaxBytesError
-			if errors.As(err, &tooLarge) {
-				writeError(w, 413, "request_too_large", "request body exceeds 64 KiB")
-				return
-			}
-			writeError(w, 400, "invalid_request", "expected one JSON object with name, client_name, site_name and console_domains")
-			return
-		}
-		if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
-			writeError(w, 400, "invalid_request", "expected one JSON object")
+		if !readJSON(w, r, &in) {
 			return
 		}
 		if err := in.Normalize(); err != nil {
@@ -73,10 +51,8 @@ func partnerRoutes(r *mux.Router, store PartnerStore, log *zap.Logger) {
 		writeJSON(w, status, p)
 	}).Methods(http.MethodPost)
 	r.HandleFunc("/internal/v1/partners/{partner_id}", func(w http.ResponseWriter, r *http.Request) {
-		raw := mux.Vars(r)["partner_id"]
-		id, err := strconv.Atoi(raw)
-		if err != nil || len(raw) != 4 || id < 1000 || id > 9999 {
-			writeError(w, 400, "invalid_request", "partner_id must contain four digits from 1000 through 9999")
+		id, ok := pathID(w, mux.Vars(r)["partner_id"], "partner_id")
+		if !ok {
 			return
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
@@ -92,6 +68,8 @@ func partnerRoutes(r *mux.Router, store PartnerStore, log *zap.Logger) {
 
 func partnerError(w http.ResponseWriter, err error, log *zap.Logger) {
 	switch {
+	case errors.Is(err, partners.ErrInstanceUnavailable):
+		writeError(w, 409, "instance_unavailable", err.Error())
 	case errors.Is(err, partners.ErrNotFound):
 		writeError(w, 404, "not_found", "partner not found")
 	case errors.Is(err, partners.ErrRequestConflict):

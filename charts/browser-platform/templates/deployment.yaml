@@ -73,8 +73,6 @@ spec:
               value: {{ required "keycloak.url is required" .Values.keycloak.url | quote }}
             - name: KEYCLOAK_CLIENT_ID
               value: {{ required "keycloak.clientId is required" .Values.keycloak.clientId | quote }}
-            - name: CONSOLE_URL
-              value: {{ required "console.url is required" .Values.console.url | quote }}
           startupProbe:
             httpGet:
               path: /internal/v1/health

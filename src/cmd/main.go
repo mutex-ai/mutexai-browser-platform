@@ -15,8 +15,9 @@ import (
 
 	"github.com/mutex-ai/mutexai-browser-platform/src/internal/config"
 	"github.com/mutex-ai/mutexai-browser-platform/src/internal/keycloak"
-	"github.com/mutex-ai/mutexai-browser-platform/src/partners"
 	"github.com/mutex-ai/mutexai-browser-platform/src/server"
+	"github.com/mutex-ai/mutexai-browser-platform/src/storage/instances"
+	"github.com/mutex-ai/mutexai-browser-platform/src/storage/partners"
 	"github.com/mutex-ai/mutexai-browser-platform/src/storage/postgres"
 	"github.com/mutex-ai/mutexai-browser-platform/src/storage/schema"
 	api "github.com/mutex-ai/mutexai-browser-platform/src/web_api"
@@ -77,16 +78,13 @@ func run() (runErr error) {
 		return err
 	}
 	defer kc.CloseIdleConnections()
-	provisioner, err := partners.NewProvisioner(kc, config.LoadPartnerSetup())
-	if err != nil {
-		return err
-	}
+	provisioner := partners.NewProvisioner(kc)
 	store := partners.NewStore(db)
 	workerCtx, stopWorker := context.WithCancel(ctx)
 	workerDone := make(chan struct{})
 	go func() { defer close(workerDone); partners.NewWorker(store, provisioner, log).Run(workerCtx) }()
 	defer func() { stopWorker(); <-workerDone }()
-	srv, err := server.New(server.Options{Cfg: cfg.Server, Handler: api.NewRouter(db, log, store), Log: log})
+	srv, err := server.New(server.Options{Cfg: cfg.Server, Handler: api.NewRouter(db, log, store, instances.NewStore(db)), Log: log})
 	if err != nil {
 		return err
 	}

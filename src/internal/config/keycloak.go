@@ -3,8 +3,6 @@ package config
 import (
 	"os"
 
-	"github.com/mutex-ai/mutexai-browser-platform/src/partners"
-
 	"github.com/mutex-ai/mutexai-browser-platform/src/internal/keycloak"
 )
 
@@ -20,9 +18,4 @@ func LoadKeycloak() (keycloak.Config, error) {
 		cfg.ClientID = "platform-provisioner"
 	}
 	return cfg, cfg.Validate()
-}
-
-// LoadPartnerSetup loads environment-owned application settings for realm setup.
-func LoadPartnerSetup() partners.SetupConfig {
-	return partners.SetupConfig{ConsoleURL: os.Getenv("CONSOLE_URL"), ConsoleSecret: os.Getenv("CONSOLE_CLIENT_SECRET")}
 }

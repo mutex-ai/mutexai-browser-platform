@@ -24,6 +24,10 @@ The Platform API records ownership, staff permissions and instance assignments. 
 
 **Keycloak verifies people; the assigned instance registers and verifies extensions.** The Platform API supplies ownership and instance assignments. It does not perform company SSO login or issue extension credentials.
 
+Each instance has its own console URL and console signing key. Platform registers its UI as a separate client in every partner Console realm it serves, using `platform-ui-{instance_id}` as the client ID. The UI authenticates with signed client assertions (`private_key_jwt`); each registration trusts that instance's public-key endpoint at `{console_url}/.well-known/jwks.json`. Private keys stay in the UI's deployment Secret. Console users, realms and sessions remain separate from extension enrollment.
+
+Console clients use only `profile`, `email` and application-role scopes, with offline access disabled. New realms use Keycloak's built-in 15-character minimum password policy and brute-force protection. Console MFA remains optional initially. The provisioning service account and human administrators have separate credentials; MSP administrators receive application roles, not Keycloak administration roles.
+
 For MSP console login, Platform maps registered MSP email domains to the partner's Console realm. The console server performs this private lookup before login. Discovery selects a login destination; it grants no customer access. Extension SSO discovery and client employee console access will be addressed separately.
 
 ## Customer ownership

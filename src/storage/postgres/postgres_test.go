@@ -39,6 +39,10 @@ func TestPoolLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
+	var zone string
+	if err := db.QueryRowContext(ctx, "SHOW timezone").Scan(&zone); err != nil || zone != "UTC" {
+		t.Fatalf("application connection timezone = %q, want UTC: %v", zone, err)
+	}
 
 	t.Run("pool saturation respects cancellation", func(t *testing.T) {
 		var held []*sql.Conn

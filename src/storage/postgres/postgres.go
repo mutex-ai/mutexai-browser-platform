@@ -20,6 +20,7 @@ func Open(ctx context.Context, databaseURL string) (*sql.DB, error) {
 		return nil, errors.New("invalid PostgreSQL connection settings")
 	}
 	cfg.ConnectTimeout = 5 * time.Second
+	cfg.RuntimeParams["timezone"] = "UTC"
 	db := stdlib.OpenDB(*cfg)
 	db.SetMaxOpenConns(10)
 	db.SetMaxIdleConns(5)

@@ -4,7 +4,7 @@ export GOWORK := off
 BINARY := bin/browser-platform
 IMAGE ?= mutexai-browser-platform:dev
 
-.PHONY: build run migrate test integration keycloak-integration check fmt lint image helm-check install deploy uninstall
+.PHONY: build run migrate test integration keycloak-integration security check fmt lint image helm-check install deploy uninstall
 
 install:
 	./scripts/install-platform.sh
@@ -32,13 +32,16 @@ integration:
 
 keycloak-integration:
 	@test -n "$$TEST_KEYCLOAK_URL" -a -n "$$TEST_KEYCLOAK_CLIENT_ID" -a -n "$$TEST_KEYCLOAK_CLIENT_SECRET" || (echo "Set the three TEST_KEYCLOAK_* variables for a disposable integration account"; exit 1)
-	go test ./src/internal/keycloak ./src/partners -run 'TestAdminAPI|TestProvisioner' -race -count=1 -v -timeout=2m
+	go test ./src/internal/keycloak ./src/storage/partners -run 'TestAdminAPI|TestProvisioner' -race -count=1 -v -timeout=2m
 
 fmt:
 	gofmt -w src
 
 lint:
 	golangci-lint run --timeout=5m
+
+security:
+	go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
 
 check:
 	@test -z "$$(gofmt -l src)" || (gofmt -l src; exit 1)

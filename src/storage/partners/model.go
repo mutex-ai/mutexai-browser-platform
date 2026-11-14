@@ -12,16 +12,18 @@ import (
 )
 
 var (
-	ErrNotFound        = errors.New("partner not found")
-	ErrRequestConflict = errors.New("idempotency key was used for a different request")
-	ErrDomainConflict  = errors.New("a console domain already belongs to another partner")
-	ErrCapacity        = errors.New("partner ID range is exhausted")
-	ErrLeaseLost       = errors.New("setup lease is no longer owned")
+	ErrNotFound            = errors.New("partner not found")
+	ErrRequestConflict     = errors.New("idempotency key was used for a different request")
+	ErrDomainConflict      = errors.New("a console domain already belongs to another partner")
+	ErrCapacity            = errors.New("partner ID range is exhausted")
+	ErrInstanceUnavailable = errors.New("instance must exist and accept new clients")
+	ErrLeaseLost           = errors.New("setup lease is no longer owned")
 )
 
 // CreateInput contains operator-approved names and console domains. Credentials
 // and infrastructure addresses are deliberately absent from the request.
 type CreateInput struct {
+	InstanceID     int      `json:"instance_id"`
 	Name           string   `json:"name"`
 	ClientName     string   `json:"client_name"`
 	SiteName       string   `json:"site_name"`
@@ -30,6 +32,9 @@ type CreateInput struct {
 
 // Normalize validates and canonicalizes a creation request before hashing it.
 func (in *CreateInput) Normalize() error {
+	if in.InstanceID < 1000 || in.InstanceID > 9999 {
+		return errors.New("instance_id must identify a registered instance from 1000 through 9999")
+	}
 	for _, name := range []*string{&in.Name, &in.ClientName, &in.SiteName} {
 		*name = strings.TrimSpace(*name)
 		if *name == "" || utf8.RuneCountInString(*name) > 200 || strings.ContainsFunc(*name, unicode.IsControl) {
@@ -64,22 +69,27 @@ func (in *CreateInput) Normalize() error {
 }
 
 // Partner is the creation/status view, including its initial client and site.
-// Complete identity setup does not imply an instance assignment or SSO enrollment.
+// The initial client owns its instance assignment; all its sites inherit it.
 type Partner struct {
-	PartnerID      int        `json:"partner_id"`
-	Name           string     `json:"name"`
-	Enabled        bool       `json:"enabled"`
-	ClientID       int        `json:"client_id"`
-	ClientName     string     `json:"client_name"`
-	SiteID         int        `json:"site_id"`
-	SiteName       string     `json:"site_name"`
-	ConsoleDomains []string   `json:"console_domains"`
-	ConsoleRealm   string     `json:"console_realm"`
-	SSORealm       string     `json:"sso_realm"`
-	SetupStatus    string     `json:"setup_status"`
-	SetupError     string     `json:"setup_error,omitempty"`
-	RetryAt        *time.Time `json:"retry_at,omitempty"`
-	CreatedAt      time.Time  `json:"created_at"`
+	InstanceID      int        `json:"instance_id,omitempty"`
+	ConsoleURL      string     `json:"console_url,omitempty"`
+	BackendURL      string     `json:"backend_url,omitempty"`
+	ConsoleClientID string     `json:"console_client_id,omitempty"`
+	ConsoleJWKSURL  string     `json:"console_jwks_url,omitempty"`
+	PartnerID       int        `json:"partner_id"`
+	Name            string     `json:"name"`
+	Enabled         bool       `json:"enabled"`
+	ClientID        int        `json:"client_id"`
+	ClientName      string     `json:"client_name"`
+	SiteID          int        `json:"site_id"`
+	SiteName        string     `json:"site_name"`
+	ConsoleDomains  []string   `json:"console_domains"`
+	ConsoleRealm    string     `json:"console_realm"`
+	SSORealm        string     `json:"sso_realm"`
+	SetupStatus     string     `json:"setup_status"`
+	SetupError      string     `json:"setup_error,omitempty"`
+	RetryTSUTC      *time.Time `json:"retry_ts_utc,omitempty"`
+	CreatedTSUTC    time.Time  `json:"created_ts_utc"`
 }
 
 // Job carries one fenced setup lease. Its setup ID also marks owned KC resources.

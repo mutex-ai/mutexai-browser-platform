@@ -23,6 +23,7 @@
 - PostgreSQL is Platform's store. Use explicit SQL columns, parameterized queries, transactions and database constraints where correctness requires them.
 - Preserve parent-scoped identity: a client needs `partner_id` and `client_id`; a site also needs `site_id`. IDs are allocated from `1000` through `9999` and are not reused within a parent.
 - Identify people by registered realm/issuer and permanent user ID. Email is not an account identifier or permission check; its domain is a console discovery hint only.
+- Use `*_ts_utc` names for stored and returned timestamps, PostgreSQL `timestamptz`, and RFC 3339 UTC values in JSON.
 - Keep one authoritative representation of each stored record. Use separate request or response types when callers must not set or see stored fields. JSON names use `snake_case`.
 - Add new embedded SQL migrations; do not rewrite published migrations. Keep migration history in `public.goose_db_version` and retain locking for concurrent startup.
 - Integration tests use a new disposable database. Never clear application data to make a test pass.

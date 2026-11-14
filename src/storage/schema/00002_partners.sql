@@ -11,7 +11,7 @@ CREATE TABLE platform.partners (
     enabled boolean NOT NULL DEFAULT true,
     console_realm_id text,
     sso_realm_id text,
-    created_at timestamptz NOT NULL DEFAULT now()
+    created_ts_utc timestamptz NOT NULL DEFAULT now()
 );
 CREATE TABLE platform.clients (
     partner_id integer NOT NULL REFERENCES platform.partners(partner_id),
@@ -41,19 +41,19 @@ CREATE TABLE platform.partner_setup (
     request_hash bytea NOT NULL,
     status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'running', 'failed', 'complete')),
     attempts integer NOT NULL DEFAULT 0,
-    next_attempt_at timestamptz NOT NULL DEFAULT now(),
+    next_attempt_ts_utc timestamptz NOT NULL DEFAULT now(),
     lease_token text,
-    lease_until timestamptz,
+    lease_expires_ts_utc timestamptz,
     last_error text,
-    updated_at timestamptz NOT NULL DEFAULT now()
+    updated_ts_utc timestamptz NOT NULL DEFAULT now()
 );
-CREATE INDEX partner_setup_due ON platform.partner_setup(next_attempt_at) WHERE status <> 'complete';
+CREATE INDEX partner_setup_due ON platform.partner_setup(next_attempt_ts_utc) WHERE status <> 'complete';
 CREATE TABLE platform.changes (
     change_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     partner_id integer NOT NULL REFERENCES platform.partners(partner_id),
     event text NOT NULL,
     source text NOT NULL,
-    created_at timestamptz NOT NULL DEFAULT now()
+    created_ts_utc timestamptz NOT NULL DEFAULT now()
 );
 
 -- +goose Down

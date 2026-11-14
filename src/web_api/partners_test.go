@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mutex-ai/mutexai-browser-platform/src/partners"
+	"github.com/mutex-ai/mutexai-browser-platform/src/storage/partners"
 	"go.uber.org/zap"
 )
 
@@ -30,7 +30,7 @@ func TestPartnerAPI(t *testing.T) {
 		status                                 int
 		err                                    error
 	}{
-		{name: "create", method: "POST", path: "/internal/v1/partners", body: `{"name":"MSP","client_name":"Client","site_name":"Office","console_domains":["MSP.EXAMPLE."]}`, key: "request-1", content: "application/json", status: 202},
+		{name: "create", method: "POST", path: "/internal/v1/partners", body: `{"instance_id":1000,"name":"MSP","client_name":"Client","site_name":"Office","console_domains":["MSP.EXAMPLE."]}`, key: "request-1", content: "application/json", status: 202},
 		{name: "oversized request", method: "POST", path: "/internal/v1/partners", body: strings.Repeat(" ", 65<<10) + `{}`, key: "large", content: "application/json", status: 413},
 		{name: "missing key", method: "POST", path: "/internal/v1/partners", body: `{}`, content: "application/json", status: 400},
 		{name: "unknown field", method: "POST", path: "/internal/v1/partners", body: `{"secret":"not-accepted"}`, key: "a", content: "application/json", status: 400},
@@ -43,7 +43,7 @@ func TestPartnerAPI(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store := &partnerStub{err: tc.err}
-			router := NewRouter(pingFunc(func(context.Context) error { return nil }), zap.NewNop(), store)
+			router := NewRouter(pingFunc(func(context.Context) error { return nil }), zap.NewNop(), store, nil)
 			r := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
 			r.Header.Set("Idempotency-Key", tc.key)
 			r.Header.Set("Content-Type", tc.content)

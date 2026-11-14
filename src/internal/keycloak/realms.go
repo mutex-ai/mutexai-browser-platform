@@ -17,6 +17,7 @@ type Realm struct {
 	ResetPasswordAllowed  *bool             `json:"resetPasswordAllowed,omitempty"`
 	LoginWithEmail        *bool             `json:"loginWithEmailAllowed,omitempty"`
 	BruteForceProtected   *bool             `json:"bruteForceProtected,omitempty"`
+	PasswordPolicy        string            `json:"passwordPolicy,omitempty"`
 	SSLRequired           string            `json:"sslRequired,omitempty"`
 	AccessTokenLifespan   *int              `json:"accessTokenLifespan,omitempty"`
 	SSOSessionIdleTimeout *int              `json:"ssoSessionIdleTimeout,omitempty"`

@@ -11,6 +11,7 @@ import (
 // settings during updates, including explicit empty redirect/origin lists.
 type Application struct {
 	ID                        string            `json:"id,omitempty"`
+	ClientAuthenticatorType   string            `json:"clientAuthenticatorType,omitempty"`
 	ClientID                  string            `json:"clientId,omitempty"`
 	Protocol                  string            `json:"protocol,omitempty"`
 	Secret                    string            `json:"secret,omitempty"`
@@ -21,6 +22,8 @@ type Application struct {
 	DirectAccessGrantsEnabled *bool             `json:"directAccessGrantsEnabled,omitempty"`
 	ServiceAccountsEnabled    *bool             `json:"serviceAccountsEnabled,omitempty"`
 	FullScopeAllowed          *bool             `json:"fullScopeAllowed,omitempty"`
+	DefaultClientScopes       *[]string         `json:"defaultClientScopes,omitempty"`
+	OptionalClientScopes      *[]string         `json:"optionalClientScopes,omitempty"`
 	RedirectURIs              *[]string         `json:"redirectUris,omitempty"`
 	WebOrigins                *[]string         `json:"webOrigins,omitempty"`
 	Attributes                map[string]string `json:"attributes,omitempty"`
@@ -82,8 +85,12 @@ func (c *Client) CreateApplication(ctx context.Context, realm string, app Applic
 	return createdID(headers)
 }
 
-// UpdateApplication changes only supplied settings, including secret rotation.
+// UpdateApplication changes supplied settings, including secret rotation.
+// Existing client-scope assignments use Keycloak's dedicated scope endpoints.
 func (c *Client) UpdateApplication(ctx context.Context, realm, id string, settings Application) error {
+	if settings.DefaultClientScopes != nil || settings.OptionalClientScopes != nil {
+		return errors.New("client-scope assignments cannot be changed through the application update endpoint")
+	}
 	settings.ID = ""
 	_, err := c.do(ctx, http.MethodPut, []string{realm, "clients", id}, nil, settings, nil)
 	return err
@@ -110,19 +117,4 @@ func (c *Client) ClientRoles(ctx context.Context, realm, clientID string) ([]Rol
 func (c *Client) AllowClientRoles(ctx context.Context, realm, loginClientID, resourceClientID string, roles []Role) error {
 	_, err := c.do(ctx, http.MethodPost, []string{realm, "clients", loginClientID, "scope-mappings", "clients", resourceClientID}, nil, roles, nil)
 	return err
-}
-
-// ApplicationSecret reads the console application's secret for retry verification.
-// The returned value must never be logged or returned to API callers.
-func (c *Client) ApplicationSecret(ctx context.Context, realm, id string) (string, error) {
-	var body struct {
-		Value string `json:"value"`
-	}
-	if _, err := c.do(ctx, http.MethodGet, []string{realm, "clients", id, "client-secret"}, nil, nil, &body); err != nil {
-		return "", err
-	}
-	if body.Value == "" {
-		return "", errors.New("keycloak returned no application secret")
-	}
-	return body.Value, nil
 }

@@ -26,7 +26,9 @@ func NewWorker(store *Store, p *Provisioner, log *zap.Logger) *Worker {
 // Run blocks until cancellation. Every attempt is shorter than its database lease.
 func (w *Worker) Run(ctx context.Context) {
 	for ctx.Err() == nil {
-		job, err := w.store.Claim(ctx)
+		claim, cancel := context.WithTimeout(ctx, 5*time.Second)
+		job, err := w.store.Claim(claim)
+		cancel()
 		if err != nil {
 			if !errors.Is(err, sql.ErrNoRows) && ctx.Err() == nil {
 				w.log.Warn("claim partner setup failed")
@@ -34,7 +36,7 @@ func (w *Worker) Run(ctx context.Context) {
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.After(WaitInterval):
+			case <-time.After(time.Second):
 				continue
 			}
 		}
@@ -65,6 +67,8 @@ func (w *Worker) Run(ctx context.Context) {
 
 func setupError(err error) string {
 	switch {
+	case errors.Is(err, ErrInstanceUnavailable):
+		return "instance_assignment_required"
 	case errors.Is(err, ErrOwnership):
 		return "identity_ownership_conflict"
 	case errors.Is(err, ErrConfiguration):
