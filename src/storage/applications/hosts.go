@@ -8,6 +8,7 @@ import (
 	"unicode"
 
 	"golang.org/x/net/idna"
+	"golang.org/x/net/publicsuffix"
 )
 
 var dnsNames = idna.New(idna.MapForLookup(), idna.StrictDomainName(true), idna.VerifyDNSLength(true))
@@ -16,7 +17,7 @@ var dnsNames = idna.New(idna.MapForLookup(), idna.StrictDomainName(true), idna.V
 // Exact resolver hosts omit www because CP already treats both forms as aliases.
 // Wildcards remain literal patterns; each * keeps CP's single-label semantics.
 func normalizeHost(raw string, wildcard, alias bool) (string, error) {
-	host := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(raw)), ".")
+	host := strings.ToLower(strings.TrimSpace(raw))
 	if host == "" || strings.ContainsAny(host, `/\:@?#%[]`) {
 		return "", ErrInvalid
 	}
@@ -35,10 +36,7 @@ func normalizeHost(raw string, wildcard, alias bool) (string, error) {
 		}
 	}
 	host = strings.Join(labels, ".")
-	if alias && !strings.Contains(host, "*") {
-		host = strings.TrimPrefix(host, "www.")
-	}
-	if !strings.Contains(host, ".") || strings.HasSuffix(host, ".") || net.ParseIP(host) != nil {
+	if strings.HasPrefix(host, ".") || strings.Contains(host, "..") {
 		return "", ErrInvalid
 	}
 	// IDNA validates DNS syntax and lengths. Replacing stars only for validation
@@ -46,14 +44,26 @@ func normalizeHost(raw string, wildcard, alias bool) (string, error) {
 	if _, err := dnsNames.ToASCII(strings.ReplaceAll(host, "*", "x")); err != nil {
 		return "", ErrInvalid
 	}
+	host = strings.TrimSuffix(host, ".")
+	if !strings.Contains(host, ".") || net.ParseIP(host) != nil {
+		return "", ErrInvalid
+	}
+	if alias && !strings.Contains(host, "*") && strings.HasPrefix(host, "www.") {
+		// Strip only subdomain aliases, preserving registrable names like www.com.
+		if root, err := publicsuffix.EffectiveTLDPlusOne(host); err == nil {
+			for host != root && strings.HasPrefix(host, "www.") {
+				host = strings.TrimPrefix(host, "www.")
+			}
+		}
+	}
 	return host, nil
 }
 
 func normalizeHosts(object map[string]any, field string, wildcard, alias bool) ([]string, error) {
 	values, ok := object[field].([]any)
-	if !ok {
+	if !ok { // The schema reports missing fields and incorrect types.
 		return nil, nil
-	} // the schema reports missing fields and incorrect types.
+	}
 	hosts := make([]string, 0, len(values))
 	seen := make(map[string]bool, len(values))
 	for _, value := range values {
@@ -70,9 +80,9 @@ func normalizeHosts(object map[string]any, field string, wildcard, alias bool) (
 			seen[host] = true
 		}
 	}
-	if alias {
+	if alias { // Homepage order carries the preferred display host.
 		slices.Sort(hosts)
-	} // homepage order carries the preferred display host.
+	}
 	object[field] = stringValues(hosts)
 	return hosts, nil
 }

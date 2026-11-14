@@ -174,12 +174,16 @@ func testApplications(t *testing.T, db *sql.DB) {
 		if _, _, err := store.Create(ctx, "app-reserved-host", applicationDefinition(t, "reserved", "reserved.example")); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := other.Update(ctx, record.ID, 2, applicationDefinition(t, "replacement", "reserved.example")); !errors.Is(err, applications.ErrHostConflict) {
+		if _, err := other.Update(ctx, record.ID, 2, applicationDefinition(t, "replacement", "new-safe.example", "reserved.example")); !errors.Is(err, applications.ErrHostConflict) {
 			t.Fatalf("conflicting edit accepted: %v", err)
 		}
 		after, err := store.Get(ctx, record.ID)
 		if err != nil || string(after.App) != string(before.App) || after.Revision != before.Revision || !after.UpdatedTSUTC.Equal(before.UpdatedTSUTC) {
 			t.Fatal("failed edit changed definition, hosts, revision or timestamps")
+		}
+		var partialClaim bool
+		if err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM platform.application_hosts WHERE host_pattern='new-safe.example')`).Scan(&partialClaim); err != nil || partialClaim {
+			t.Fatal("failed multi-host edit left a partial claim")
 		}
 		var oldHosts int
 		if err := db.QueryRowContext(ctx, `SELECT count(*) FROM platform.application_hosts WHERE host_pattern IN ('example.com','*.xn--bcher-kva.de')`).Scan(&oldHosts); err != nil || oldHosts != 0 {

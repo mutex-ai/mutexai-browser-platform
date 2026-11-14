@@ -252,8 +252,6 @@ func constraintError(err error) error {
 		return ErrSlugConflict
 	case "application_hosts_pkey":
 		return ErrHostConflict
-	case "applications_pkey":
-		return errIDCollision
 	default:
 		return err
 	}

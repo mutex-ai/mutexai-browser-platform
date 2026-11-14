@@ -11,7 +11,6 @@ import (
 	"regexp"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -32,18 +31,20 @@ var (
 //go:embed definition.schema.json
 var definitionSchema []byte
 
-var compiledSchema = sync.OnceValues(func() (*jsonschema.Schema, error) {
+// Compile the embedded schema at startup, like regexp.MustCompile: a broken
+// build must fail immediately rather than serve requests that cannot validate.
+var definitionValidator = func() *jsonschema.Schema {
 	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(definitionSchema))
 	if err != nil {
-		return nil, err
+		panic(fmt.Errorf("parse application schema: %w", err))
 	}
 	c := jsonschema.NewCompiler()
 	const location = "https://mutex.ai/schemas/application-definition/v1.json"
 	if err := c.AddResource(location, doc); err != nil {
-		return nil, err
+		panic(fmt.Errorf("load application schema: %w", err))
 	}
-	return c.Compile(location)
-})
+	return c.MustCompile(location)
+}()
 
 var appIDPattern = regexp.MustCompile(`^[0-9a-f]{12}$`)
 
@@ -80,7 +81,11 @@ func ParseDefinition(raw []byte) (Definition, error) {
 	if err != nil {
 		return Definition{}, fmt.Errorf("%w: expected one JSON object", ErrInvalid)
 	}
-	doc, ok := trimStrings(value).(map[string]any)
+	value, err = normalizeText(value)
+	if err != nil {
+		return Definition{}, err
+	}
+	doc, ok := value.(map[string]any)
 	if !ok || doc == nil {
 		return Definition{}, fmt.Errorf("%w: expected one JSON object", ErrInvalid)
 	}
@@ -134,11 +139,7 @@ func ParseDefinition(raw []byte) (Definition, error) {
 			}
 		}
 	}
-	validator, err := compiledSchema()
-	if err != nil {
-		return Definition{}, fmt.Errorf("compile application schema: %w", err)
-	}
-	if err := validator.Validate(doc); err != nil {
+	if err := definitionValidator.Validate(doc); err != nil {
 		return Definition{}, fmt.Errorf("%w: definition must match catalog schema v3; omit IDs, revisions and write timestamps", ErrInvalid)
 	}
 	// JSON Schema accepts 3.0 as an integer, while CP's Go models expect an
@@ -166,20 +167,34 @@ func ParseDefinition(raw []byte) (Definition, error) {
 	return Definition{body: body, hosts: hosts, dependencies: dependencies, hash: hash}, nil
 }
 
-func trimStrings(value any) any {
+func normalizeText(value any) (any, error) {
 	switch v := value.(type) {
 	case string:
-		return strings.TrimSpace(v)
+		if strings.ContainsRune(v, 0) {
+			return nil, fmt.Errorf("%w: text must not contain NUL characters", ErrInvalid)
+		}
+		return strings.TrimSpace(v), nil
 	case map[string]any:
 		for key, item := range v {
-			v[key] = trimStrings(item)
+			if strings.ContainsRune(key, 0) {
+				return nil, fmt.Errorf("%w: field names must not contain NUL characters", ErrInvalid)
+			}
+			normalized, err := normalizeText(item)
+			if err != nil {
+				return nil, err
+			}
+			v[key] = normalized
 		}
 	case []any:
 		for i, item := range v {
-			v[i] = trimStrings(item)
+			normalized, err := normalizeText(item)
+			if err != nil {
+				return nil, err
+			}
+			v[i] = normalized
 		}
 	}
-	return value
+	return value, nil
 }
 
 func stringValues(values []string) []any {

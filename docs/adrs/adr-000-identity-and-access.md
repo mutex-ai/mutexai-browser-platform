@@ -124,15 +124,15 @@ The extension uses its machine credentials to send telemetry and retrieve polici
 | Service | Responsibility | Placement |
 | --- | --- | --- |
 | Keycloak | Console login, client SSO login and the associated human accounts | Shared per environment, with separate realms for each partner and purpose. |
-| Platform API and its database | Partner, client and site records; staff permissions; instance assignments; registered console domains; setup of realms and organizations | Private, shared per environment. |
-| Console | Staff login experience, private Platform calls, customer/site selection and management screens | Shared application with a public interface and server-side private network access. |
+| Platform API and its database | Customer directory, staff permissions, instance assignments, realm and organization setup, and the global application registry | Private, shared per environment. |
+| Console | Staff login, private Platform calls, customer/site selection and management screens | One console per instance, with a public interface and private server connections. |
 | Browser backend | Extension machine identities and credentials, device approval, client policies, telemetry and access to client data | One deployment per instance. |
 | Instance storage | Device records, policies, telemetry and extension connection state | Separate storage per instance. Clients sharing an instance still require separate data access checks. |
 
 ```mermaid
 %%{init: {"theme": "neutral"}}%%
 flowchart TB
-    staff["MSP staff"] --> console["Shared console server"]
+    staff["MSP staff"] --> console
     console -->|"Login"| keycloak["Shared Keycloak"]
     console -->|"Private realm discovery and permitted customer operations"| platform["Private Platform API"]
     console -->|"Manage client devices and policies"| backend
@@ -140,6 +140,7 @@ flowchart TB
     extension["Browser extension"] -->|"Register and send telemetry"| backend
     extension -->|"Person signs in for SSO enrollment"| keycloak
     subgraph instance["Assigned instance"]
+        console["Instance console server"]
         backend["Browser backend"] --> storage[("Instance storage")]
     end
 ```

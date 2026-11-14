@@ -8,58 +8,39 @@
 
 ## Context
 
-The browser backend embeds a curated application catalog and copies it into ClickHouse. That couples the source of shared app definitions to instance releases. Platform needs a shared, editable registry that every replica reads from the same PostgreSQL database.
-
-These records describe applications and shared login providers. Customer usage, policies and telemetry are separate instance data. The registry is global and has no partner, client or site ownership columns.
+The browser backend embeds the application catalog and copies it into ClickHouse. Platform needs an editable registry shared by all its replicas. Application definitions are global; customer usage, policies and telemetry remain instance data.
 
 ## Decision
 
-Store app definitions in Platform's PostgreSQL database. Mutex operators create and edit records through private, port-forwarded API calls. CP consumes read operations; its cache and matching implementation are separate work. Retain the existing private operator access model.
+Store the registry in PostgreSQL. Operators create and replace definitions through private, port-forwarded API calls. The four routes and request examples are documented in the [README](../../README.md#application-registry). Keep the existing private operator access model.
 
 ```mermaid
 flowchart LR
-    operator["Mutex operator"] -->|"POST / PUT through port forwarding"| platform["Platform API replicas"]
-    cp["Instance browser backend"] -.->|"Future integration: GET on cache miss"| platform
-    platform -->|"Shared records and atomic writes"| postgres[("PostgreSQL")]
-    cp -->|"Existing local lookup index"| redis[("Instance Redis")]
+    operator["Mutex operator"] -->|"Create and edit through port forwarding"| platform["Platform API replicas"]
+    cp["Instance browser backend"] -.->|"Planned: read and cache"| platform
+    platform -->|"Read and write shared records"| postgres[("PostgreSQL")]
+    cp -->|"Local matching index"| redis[("Instance Redis")]
 ```
 
-The dashed connection identifies planned CP integration. The four Platform routes are implemented by this decision.
+The dashed connection is planned CP integration. The registry starts empty; startup does not seed data or overwrite operator edits. Moving the existing catalog requires preserving its IDs and correcting conflicting host claims first.
 
-| Method | Path | Behavior |
-| --- | --- | --- |
-| GET | `/internal/v1/applications` | Complete collection, including identity records, ordered by app ID. |
-| GET | `/internal/v1/applications/{app_id}` | One complete app and an edit ETag. |
-| POST | `/internal/v1/applications` | Create a definition with a generated, permanent ID and retry-safe request key. |
-| PUT | `/internal/v1/applications/{app_id}` | Replace the editable definition only if its ETag still matches. |
-
-Preserve the catalog-v3 fields. Inputs exclude server-owned IDs, revisions and write timestamps. Read responses include the assembled app document and UTC record timestamps. New IDs use the existing 12-character hexadecimal format; customer hierarchy numbering is unchanged. Existing catalog records are not automatically imported or assigned new IDs by this implementation.
-
-## Validation and normalization
-
-Go validates definitions before SQL writes, using the existing JSON Schema through a standard Go validator. Normalize names and other string values by trimming surrounding whitespace. Lowercase slugs and kinds. Normalize DNS hosts with IDNA tooling, reject URLs/ports/IPs, remove a trailing dot and use ASCII punycode. Exact resolver hosts omit `www.` because CP already treats it as an alias. Preserve wildcard patterns and homepage preference order. Sort and deduplicate resolver hosts and dependency IDs before computing creation request hashes.
-
-Use the current application schema's categories, subcategories, capabilities and cross-field rules. Preserve explicit empty and unknown values. Dependencies must identify existing apps other than the edited app. PostgreSQL's role is transactional storage and uniqueness, not application-definition validation.
-
-## Tables and indexes
+## Records and ownership
 
 | Table | Stored values | Indexes |
 | --- | --- | --- |
-| `platform.applications` | Permanent ID, JSONB definition, revision, UTC record times and creation request key/hash. | Primary key on ID; unique slug expression index; unique creation request key. |
-| `platform.application_hosts` | Normalized host pattern and owning app ID. | Primary key on pattern; index on app ID; foreign key to the app. |
+| `platform.applications` | Permanent ID, JSONB definition, revision, UTC record times and creation request key/hash. | Primary key on ID; unique slug index; unique creation request key. |
+| `platform.application_hosts` | Normalized host pattern and owning app ID. | Primary key on pattern; app-ID index and foreign key. |
 
-IDs, revisions and host claims have one authoritative stored representation. The JSONB definition excludes these fields; read responses assemble them. There are no speculative JSON, taxonomy or timestamp indexes for the initial list/get queries.
+Retain the catalog-v3 fields and 12-character hexadecimal app IDs. IDs, revisions and host claims each have one authoritative stored representation; read responses assemble the complete app. Customer hierarchy numbering is unchanged.
 
-App definitions and host claims change in one transaction. PostgreSQL's unique indexes reject concurrent duplicate claims across replicas. An indexed insert does not search every app document. A conflicting normalized pattern or slug returns `409` and rolls back the entire write.
+Go normalizes and validates definitions before writes, using the existing JSON Schema and standard IDNA tooling. Host normalization must be stable when repeated. Remove `www` subdomain aliases while preserving registrable names such as `www.com`; retain wildcard patterns. Dependencies must identify existing apps other than the edited app. Preserve explicit empty values and the schema's `unknown` values.
 
-An identical host-pattern claim differs from overlapping patterns. `support.example.com` and `*.example.com` are distinct patterns; CP retains exact-match precedence. This API does not introduce a new wildcard-overlap resolver or silently choose an owner for the existing catalog's conflicting claims.
+A normalized pattern belongs to one app, enforced by the host table's primary key. Distinct overlapping patterns remain a matching concern: an exact host and a wildcard are not duplicate stored values. CP retains exact-match precedence. This registry does not choose owners for ambiguous claims by timestamp.
 
-## Reliability
+## Consistency and failures
 
-POST requires an `Idempotency-Key`; the normalized input hash distinguishes a retry from conflicting key reuse. Retries return the existing app's current state without undoing later edits. Random-ID collisions are retried against the primary key.
+Create or replace the definition and host claims in one transaction. Creation keys and normalized request hashes make retries safe across replicas without overwriting later edits. Conditional updates check and increment the revision atomically, preventing lost edits. A conflict rolls back the entire write.
 
-PUT requires the strong ETag returned by a record read. The SQL update checks and increments the revision atomically. Missing preconditions return `428`; stale edits return `412`. Failed edits preserve the prior hosts and record times. Go supplies `time.Now().UTC()` for writes; PostgreSQL stores `timestamptz` and connections use UTC.
+Go supplies UTC timestamps; PostgreSQL stores `timestamptz`. Complete reads use one SQL statement so definitions and hosts come from the same database snapshot. Storage failures return errors rather than an apparently successful empty registry. The embedded validation schema compiles at startup so a broken schema cannot leave a running service unable to validate writes.
 
-The complete registry and its host claims are read in one SQL statement. A database error returns `503` rather than an empty collection. Each replica reuses its existing bounded database pool. Startup applies migrations without seeding application data or replacing operator edits.
-
-The registry begins empty and operators populate it through the API. Moving the existing catalog requires preserving its IDs and correcting conflicting claims before CP switches its data source. Instance matching, caching and historical reporting remain unchanged in this implementation. Delete, partial updates, bulk import, background distribution and Bloom filters are outside this scope.
+CP matching, cache integration and existing catalog import are separate work. This decision adds no delete, partial-update or distribution workflow.

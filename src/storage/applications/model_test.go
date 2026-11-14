@@ -33,6 +33,11 @@ func TestDefinitionNormalization(t *testing.T) {
 	if err != nil || !strings.Contains(string(withEmpty.body), `"vendor":""`) {
 		t.Fatal("explicit empty value lost")
 	}
+	// Literal backslash text is valid; only the decoded NUL character is rejected.
+	withEscape, err := ParseDefinition([]byte(strings.Replace(exampleDefinition, `"name":"Example"`, `"name":"Example\\u0000"`, 1)))
+	if err != nil || !strings.Contains(string(withEscape.body), `Example\\u0000`) {
+		t.Fatalf("literal escape text changed or was rejected: %v", err)
+	}
 }
 
 func TestHostNormalization(t *testing.T) {
@@ -42,21 +47,44 @@ func TestHostNormalization(t *testing.T) {
 		{"*.BÜCHER.de.", "*.xn--bcher-kva.de"},
 		{"*-MY.SharePoint.COM", "*-my.sharepoint.com"},
 		{"*.wd*.myworkday.com", "*.wd*.myworkday.com"},
+		{"www.www.Example.COM", "example.com"},
+		{"www.com", "www.com"},
+		{"www.co.uk", "www.co.uk"},
+		{"WWW.BÜCHER.DE。", "xn--bcher-kva.de"},
 	} {
 		t.Run(tc.input, func(t *testing.T) {
 			got, err := normalizeHost(tc.input, true, true)
 			if err != nil || got != tc.want {
 				t.Fatalf("host = %q, %v; want %q", got, err, tc.want)
 			}
+			if again, err := normalizeHost(got, true, true); err != nil || again != got {
+				t.Fatalf("normalization is not stable: %q -> %q, %v", got, again, err)
+			}
 		})
 	}
-	for _, input := range []string{"", "localhost", "https://example.com", "example.com/path", "example.com:443", "user@example.com", "127.0.0.1", "[::1]", "bad..example.com", "-bad.example.com", "bad_.example.com", "example.com..", "example.com\n.evil.com", strings.Repeat("x", 64) + ".com", "*bücher.de"} {
+	for _, input := range []string{"", "localhost", "https://example.com", "example.com/path", "example.com:443", "user@example.com", "127.0.0.1", "[::1]", ".example.com", "bad..example.com", "-bad.example.com", "bad_.example.com", "example.com..", "example.com\n.evil.com", strings.Repeat("x", 64) + ".com", "*bücher.de"} {
 		t.Run(input, func(t *testing.T) {
 			if _, err := normalizeHost(input, true, true); err == nil {
 				t.Fatalf("invalid host accepted: %q", input)
 			}
 		})
 	}
+}
+
+func FuzzHostNormalization(f *testing.F) {
+	for _, host := range []string{"example.com", "WWW.BÜCHER.DE。", "www.www.example.com", "www.co.uk", "*.example.com", "*-my.sharepoint.com", "bad..example.com"} {
+		f.Add(host)
+	}
+	f.Fuzz(func(t *testing.T, raw string) {
+		first, err := normalizeHost(raw, true, true)
+		if err != nil {
+			return
+		}
+		second, err := normalizeHost(first, true, true)
+		if err != nil || first != second {
+			t.Fatalf("normalization is not stable: %q -> %q -> %q (%v)", raw, first, second, err)
+		}
+	})
 }
 
 func TestDefinitionValidation(t *testing.T) {
@@ -69,6 +97,7 @@ func TestDefinitionValidation(t *testing.T) {
 		{"bad category tree", strings.Replace(exampleDefinition, `"documents"`, `"chatbot"`, 1)},
 		{"invalid slug", strings.Replace(exampleDefinition, `"slug":"example"`, `"slug":"bad_slug"`, 1)},
 		{"empty name", strings.Replace(exampleDefinition, `"name":"Example"`, `"name":"  "`, 1)},
+		{"NUL in text", strings.Replace(exampleDefinition, `"name":"Example"`, `"name":"Example\u0000"`, 1)},
 		{"invalid host", strings.Replace(exampleDefinition, `"hosts":["example.com"]`, `"hosts":["https://example.com"]`, 1)},
 		{"null profile", strings.Replace(exampleDefinition, `"name":"Example"`, `"name":null`, 1)},
 		{"bad dependency", strings.Replace(exampleDefinition, `"name":"Example"`, `"depends_on":["arbitrary"],"name":"Example"`, 1)},

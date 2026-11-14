@@ -62,7 +62,7 @@ Partner and instance IDs use `1000–9999`. Client numbers are scoped to their p
 
 ## Application registry
 
-Operators create and edit global app definitions through the port-forwarded API. PostgreSQL is authoritative; application startup never imports or overwrites registry data. This change does not move the existing CP catalog or implement CP cache integration. Those consumers remain unchanged until they are explicitly switched over.
+Operators create and edit global app definitions through the port-forwarded API. PostgreSQL is authoritative and startup leaves operator data intact. CP integration and importing its existing catalog are separate work.
 
 POST and PUT take the existing catalog-v3 definition without server-owned `id`, `meta.revision` or `meta.updated_at`. Omitted `meta` defaults to `{"schema_version":3}`. Go validates the complete definition against [the registry schema](src/storage/applications/definition.schema.json) before storage. GET responses wrap the full app under `app`, with `created_ts_utc` and `updated_ts_utc` alongside it. The app includes its permanent ID and server-managed `meta.revision`.
 
@@ -81,9 +81,9 @@ curl -i -X PUT http://127.0.0.1:8002/internal/v1/applications/APP_ID \
   --data-binary @docs/examples/application.json
 ```
 
-App IDs are 12 lowercase hexadecimal characters, independent of the four-digit customer hierarchy. Slugs and hostnames are trimmed and lowercased; IDNs become ASCII punycode, one trailing dot is removed, and exact resolver hosts omit `www.` to match CP's existing alias behavior. Host lists are sorted and deduplicated. Homepage order is retained. Wildcards such as `*.example.com` and `*-my.sharepoint.com` remain intact; Unicode labels containing a wildcard must be supplied as ASCII. Bare DNS names are required; URLs, ports, IP addresses and malformed DNS names are rejected.
+App IDs are 12 lowercase hexadecimal characters, independent of the four-digit customer hierarchy. Slugs and hostnames are trimmed and lowercased; IDNs become ASCII punycode, one trailing dot is removed, and `www` subdomain aliases are removed from exact resolver hosts. Registrable names such as `www.com` and `www.co.uk` are preserved. Host lists are sorted and deduplicated. Homepage order is retained. Wildcards such as `*.example.com` and `*-my.sharepoint.com` remain intact; Unicode labels containing a wildcard must be supplied as ASCII. Bare DNS names are required; URLs, ports, IP addresses and malformed DNS names are rejected.
 
-PostgreSQL owns one canonical host-pattern claim per app. A conflicting normalized pattern or slug returns `409`; a failed write leaves the previous definition, hosts, revision and timestamps intact. Distinct overlapping patterns are not identical claims: exact-over-wildcard matching remains a CP responsibility. Dependencies must refer to existing apps other than the edited app. There is no delete or partial-update route.
+Each normalized host pattern belongs to exactly one app. A conflicting normalized pattern or slug returns `409`; a failed write leaves the previous definition, hosts, revision and timestamps intact. Distinct overlapping patterns are not identical claims: exact-over-wildcard matching remains a CP responsibility. Dependencies must refer to existing apps other than the edited app. There is no delete or partial-update route.
 
 GET collection returns `{"items":[...],"count":N}` in app-ID order, without pagination or filtering so CP can obtain the complete registry. GET and writes return a strong ETag for the selected app. PUT requires that exact tag: missing `If-Match` returns `428`, an outdated revision returns `412`, and malformed tags return `400`. Retrying POST with the same key and normalized input returns the same app's current record, even after an edit. Database failures return `503`, never an apparently successful empty registry.
 
@@ -190,6 +190,7 @@ Pull requests and main pushes run Go checks, PostgreSQL integration, Helm checks
 | `src/cmd` | Startup, migrations and shutdown |
 | `src/storage/partners` | Partner records, transactions, identity setup and worker |
 | `src/storage/instances` | Registered instance addresses and availability |
+| `src/storage/applications` | Global app definitions, Go validation and host claims |
 | `src/storage/postgres`, `src/storage/schema` | Shared database pool and embedded migrations |
 | `src/internal/keycloak` | Typed Admin API transport and resources |
 | `src/internal/config` | Environment settings |

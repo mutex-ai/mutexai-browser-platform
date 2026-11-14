@@ -55,6 +55,7 @@ func TestApplicationAPIValidationAndVersions(t *testing.T) {
 		{"invalid ID", "GET", "/internal/v1/applications/1000", "", "", 400, 0},
 		{"unknown body field", "POST", "/internal/v1/applications", strings.Replace(applicationBody, `"slug":`, `"unknown":true,"slug":`, 1), "", 400, 0},
 		{"invalid host", "POST", "/internal/v1/applications", strings.Replace(applicationBody, "EXAMPLE.COM.", "https://example.com", 1), "", 400, 0},
+		{"NUL in text", "POST", "/internal/v1/applications", strings.Replace(applicationBody, `"name":"Example"`, `"name":"Example\u0000"`, 1), "", 400, 0},
 		{"missing precondition", "PUT", "/internal/v1/applications/abcdef123456", applicationBody, "", 428, 0},
 		{"wildcard precondition", "PUT", "/internal/v1/applications/abcdef123456", applicationBody, "*", 400, 0},
 		{"weak precondition", "PUT", "/internal/v1/applications/abcdef123456", applicationBody, `W/"abcdef123456:1"`, 400, 0},
